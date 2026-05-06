@@ -192,10 +192,13 @@ Service behavior:
 Environment variables:
 
 - `REALESRGAN_WEIGHT`, default `experiments/RealESRGAN_x4plus.pth`
+- `MODEL_PATH`, fallback alias for `REALESRGAN_WEIGHT`
 - `REALESRGAN_MODEL_NAME`, default `RealESRGAN_x4plus`
 - `DEVICE`, default `cpu`
+- `GPU_ID`, optional CUDA device index when `DEVICE` starts with `cuda`
 - `REALESRGAN_OUTSCALE`, default `4`
 - `REALESRGAN_TILE`, default `256`
+- `TILE`, fallback alias for `REALESRGAN_TILE`
 - `MAX_INPUT_PIXELS`, default `4194304`
 
 Endpoints:
@@ -210,6 +213,7 @@ Output:
 - PNG image encoded as base64 in `super_resolution_image`.
 - Same base64 output also appears as `processed_image` for frontend compatibility.
 - Includes original and output image dimensions, scale, and tile.
+- The per-request `tile` value is applied before inference, so callers can use larger tiles for speed or smaller tiles for lower memory usage.
 
 ### Generated Dockerfile
 
@@ -259,6 +263,8 @@ The Dockerfile also:
 - Creates `weights/` if missing.
 - Copies `experiments/RealESRGAN_x4plus.pth` to `weights/RealESRGAN_x4plus.pth` when needed.
 - Patches `basicsr/data/degradations.py` so `rgb_to_grayscale` is imported from `torchvision.transforms.functional`, which is compatible with newer torchvision versions.
+
+For the sample archive under `2.超分模型/Real-ESRGAN.zip`, users should upload the zip directly from the frontend. They do not need to add `api.py`; the build adapter generates the platform-compatible FastAPI service during Docker image construction.
 
 Runtime command:
 
