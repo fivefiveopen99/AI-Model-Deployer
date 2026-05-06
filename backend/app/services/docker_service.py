@@ -244,6 +244,7 @@ import logging
 import os
 import sys
 from contextlib import asynccontextmanager
+from threading import Lock
 from typing import Any, Dict, Optional
 
 import cv2
@@ -426,12 +427,14 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 upsampler = None
+inference_lock = Lock()
 
-MODEL_PATH = os.getenv("REALESRGAN_WEIGHT", "experiments/RealESRGAN_x4plus.pth")
+MODEL_PATH = os.getenv("REALESRGAN_WEIGHT") or os.getenv("MODEL_PATH") or "experiments/RealESRGAN_x4plus.pth"
 MODEL_NAME = os.getenv("REALESRGAN_MODEL_NAME", "RealESRGAN_x4plus")
 DEVICE_TYPE = os.getenv("DEVICE", "cpu")
 DEFAULT_OUTSCALE = float(os.getenv("REALESRGAN_OUTSCALE", "4"))
-DEFAULT_TILE = int(os.getenv("REALESRGAN_TILE", "256"))
+DEFAULT_TILE = int(os.getenv("REALESRGAN_TILE") or os.getenv("TILE") or "256")
+GPU_ID = os.getenv("GPU_ID")
 MAX_INPUT_PIXELS = int(os.getenv("MAX_INPUT_PIXELS", "4194304"))
 
 
@@ -483,7 +486,9 @@ def run_super_resolution(img: np.ndarray, outscale: float, tile: int) -> np.ndar
         raise HTTPException(status_code=503, detail="Model not loaded")
 
     try:
-        output, _ = upsampler.enhance(img, outscale=outscale)
+        with inference_lock:
+            upsampler.tile_size = tile
+            output, _ = upsampler.enhance(img, outscale=outscale)
     except RuntimeError as error:
         raise HTTPException(status_code=500, detail=f"Real-ESRGAN inference failed: {error}")
 
@@ -499,6 +504,9 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(f"Weight file not found: {MODEL_PATH}")
 
     model, netscale = create_model()
+    gpu_id = int(GPU_ID) if GPU_ID and DEVICE_TYPE.startswith("cuda") else None
+    service_device = f"cuda:{gpu_id}" if gpu_id is not None else DEVICE_TYPE
+    use_half = DEVICE_TYPE.startswith("cuda")
     upsampler = RealESRGANer(
         scale=netscale,
         model_path=MODEL_PATH,
@@ -506,9 +514,9 @@ async def lifespan(app: FastAPI):
         tile=DEFAULT_TILE,
         tile_pad=10,
         pre_pad=0,
-        half=False,
-        gpu_id=None,
-        device=DEVICE_TYPE,
+        half=use_half,
+        gpu_id=gpu_id,
+        device=service_device,
     )
     logger.info("Real-ESRGAN model loaded")
     yield
@@ -532,6 +540,8 @@ async def health():
         "task": "image_super_resolution",
         "model_name": MODEL_NAME,
         "device": DEVICE_TYPE,
+        "weight": MODEL_PATH,
+        "tile": DEFAULT_TILE,
     }
 
 
@@ -554,7 +564,7 @@ async def predict_image(
         "original_size": {"width": img.shape[1], "height": img.shape[0]},
         "output_size": {"width": output.shape[1], "height": output.shape[0]},
         "scale": outscale,
-        "tile": DEFAULT_TILE,
+        "tile": tile,
     }
 
 
@@ -577,7 +587,7 @@ async def predict(request: PredictRequest):
             "original_size": {"width": img.shape[1], "height": img.shape[0]},
             "output_size": {"width": output.shape[1], "height": output.shape[0]},
             "scale": outscale,
-            "tile": DEFAULT_TILE,
+            "tile": tile,
         },
         "model_type": "realesrgan",
         "success": True,
