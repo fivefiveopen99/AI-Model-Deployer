@@ -1,0 +1,810 @@
+<template>
+  <div class="models-page">
+    <el-card>
+      <template #header>
+        <div class="card-header">
+          <span>模型管理</span>
+          <div class="header-actions">
+            <el-button type="primary" @click="showCreateDialog">
+              <el-icon><Plus /></el-icon>
+              添加模型
+            </el-button>
+            <el-button @click="refreshModels">
+              <el-icon><Refresh /></el-icon>
+              刷新
+            </el-button>
+          </div>
+        </div>
+      </template>
+
+      <el-table :data="modelsStore.models" v-loading="modelsStore.loading" stripe>
+        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="name" label="模型名称" />
+        <el-table-column prop="model_type" label="类型" width="120">
+          <template #default="{ row }">
+            <el-tag>{{ row.model_type }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="source_type" label="来源" width="120">
+          <template #default="{ row }">
+            <el-tag type="info">{{ row.source_type }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="status" label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag :type="getModelStatusType(row.status)">
+              {{ getModelStatusText(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="docker_image" label="Docker镜像">
+          <template #default="{ row }">
+            <span v-if="row.docker_image">
+              {{ row.docker_image }}:{{ row.docker_image_tag }}
+            </span>
+            <span v-else class="text-gray">未构建</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatDate(row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="350" fixed="right">
+          <template #default="{ row }">
+            <el-button-group>
+              <el-button size="small" @click="viewDetail(row)">详情</el-button>
+              <el-button
+                size="small"
+                type="primary"
+                @click="buildModel(row)"
+                :disabled="row.status === 'building' || row.status === 'pushing'"
+              >
+                构建
+              </el-button>
+              <el-button
+                v-if="row.status === 'building' || row.status === 'pushing'"
+                size="small"
+                type="warning"
+                @click="resetModelStatus(row)"
+              >
+                重置
+              </el-button>
+              <el-button size="small" type="danger" @click="deleteModel(row)">删除</el-button>
+            </el-button-group>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <div class="pagination">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="modelsStore.total"
+          layout="total, sizes, prev, pager, next"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
+    </el-card>
+
+    <!-- 上传进度对话框 -->
+    <el-dialog
+      v-model="uploadProgressDialogVisible"
+      title="上传进度"
+      width="500px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="!uploading"
+    >
+      <div class="progress-content">
+        <el-progress
+          :percentage="uploadProgress"
+          :status="uploadProgress === 100 ? 'success' : ''"
+          :stroke-width="20"
+          striped
+          striped-flow
+        />
+        <div class="progress-message">
+          <el-icon v-if="uploading" class="is-loading"><Loading /></el-icon>
+          <span>{{ uploadProgressMessage }}</span>
+        </div>
+        <div v-if="uploadError" class="progress-error">
+          <el-alert :title="uploadError" type="error" show-icon />
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="uploadProgressDialogVisible = false" :disabled="uploading">
+          {{ uploading ? '上传中...' : '关闭' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 构建进度对话框 -->
+    <el-dialog
+      v-model="buildStore.progressDialogVisible"
+      title="构建进度"
+      width="500px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="!buildStore.building"
+    >
+      <div class="progress-content">
+        <el-progress
+          :percentage="buildStore.buildProgress"
+          :status="buildStore.buildProgress === 100 ? 'success' : ''"
+          :stroke-width="20"
+          striped
+          striped-flow
+        />
+        <div class="progress-message">
+          <el-icon v-if="buildStore.building" class="is-loading"><Loading /></el-icon>
+          <span>{{ buildStore.progressMessage }}</span>
+        </div>
+        <div v-if="buildStore.buildError" class="progress-error">
+          <el-alert :title="buildStore.buildError" type="error" show-icon />
+        </div>
+      </div>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button v-if="buildStore.building" type="danger" @click="stopBuild">
+            <el-icon><CircleClose /></el-icon> 停止构建
+          </el-button>
+          <el-button v-if="buildStore.building" type="primary" @click="minimizeProgress">
+            <el-icon><ArrowDown /></el-icon> 最小化到后台
+          </el-button>
+          <el-button @click="closeProgressDialog" :disabled="buildStore.building">
+            {{ buildStore.building ? '构建中...' : '关闭' }}
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <!-- 最小化构建进度悬浮按钮 -->
+    <div v-if="buildStore.isProgressMinimized && buildStore.building" class="minimized-progress" @click="restoreProgress">
+      <div class="minimized-content">
+        <el-icon class="is-loading"><Loading /></el-icon>
+        <span class="minimized-text">构建中 {{ buildStore.buildProgress }}%</span>
+        <el-progress
+          :percentage="buildStore.buildProgress"
+          :show-text="false"
+          :stroke-width="4"
+          class="minimized-bar"
+        />
+      </div>
+    </div>
+
+    <!-- 添加模型对话框 -->
+    <el-dialog v-model="createDialogVisible" title="添加模型" width="700px">
+      <el-tabs v-model="activeTab">
+        <!-- GitHub URL -->
+        <el-tab-pane label="GitHub 仓库" name="github">
+          <el-form :model="githubForm" :rules="githubRules" ref="githubFormRef" label-width="100px">
+            <el-form-item label="模型名称" prop="name">
+              <el-input v-model="githubForm.name" placeholder="如：yolov8-plate" />
+            </el-form-item>
+            <el-form-item label="描述" prop="description">
+              <el-input v-model="githubForm.description" type="textarea" placeholder="请输入模型描述" />
+            </el-form-item>
+            <el-form-item label="GitHub URL" prop="url">
+              <el-input v-model="githubForm.url" placeholder="https://github.com/username/repo" />
+              <div class="form-tip">支持 GitHub 仓库地址，系统会自动克隆代码</div>
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
+
+        <!-- 上传压缩包 -->
+        <el-tab-pane label="上传压缩包" name="upload">
+          <el-form :model="uploadForm" :rules="uploadRules" ref="uploadFormRef" label-width="100px">
+            <el-form-item label="模型名称" prop="name">
+              <el-input v-model="uploadForm.name" placeholder="如：yolov8-custom" />
+            </el-form-item>
+            <el-form-item label="描述" prop="description">
+              <el-input v-model="uploadForm.description" type="textarea" placeholder="请输入模型描述" />
+            </el-form-item>
+            <el-form-item label="压缩包" prop="file">
+              <el-upload
+                ref="uploadRef"
+                action="#"
+                :auto-upload="false"
+                :on-change="handleFileChange"
+                :before-upload="beforeUpload"
+                :limit="1"
+                accept=".zip,.tar.gz,.tgz,.tar"
+              >
+                <el-button type="primary">
+                  <el-icon><Upload /></el-icon>
+                  选择文件
+                </el-button>
+                <template #tip>
+                  <div class="el-upload__tip">
+                    支持 zip, tar.gz, tar 格式，包含模型代码和权重文件<br>
+                    <el-tag type="warning">单个文件最大支持 10GB</el-tag>
+                  </div>
+                </template>
+              </el-upload>
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
+
+        <!-- 其他来源 -->
+        <el-tab-pane label="其他来源" name="other">
+          <el-form :model="otherForm" :rules="otherRules" ref="otherFormRef" label-width="100px">
+            <el-form-item label="模型名称" prop="name">
+              <el-input v-model="otherForm.name" placeholder="请输入模型名称" />
+            </el-form-item>
+            <el-form-item label="描述" prop="description">
+              <el-input v-model="otherForm.description" type="textarea" placeholder="请输入模型描述" />
+            </el-form-item>
+            <el-form-item label="来源类型" prop="source_type">
+              <el-radio-group v-model="otherForm.source_type">
+                <el-radio label="url">下载链接</el-radio>
+                <el-radio label="huggingface">HuggingFace</el-radio>
+              </el-radio-group>
+            </el-form-item>
+            <el-form-item label="路径/URL" prop="source_path">
+              <el-input v-model="otherForm.source_path" placeholder="请输入下载链接或模型ID" />
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
+      </el-tabs>
+
+      <template #footer>
+        <el-button @click="createDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitCreate" :loading="submitting">确定</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 构建模型对话框 -->
+    <el-dialog v-model="buildDialogVisible" title="构建Docker镜像" width="600px">
+      <el-alert
+        title="构建说明"
+        description="系统将自动检测模型类型并安装所需依赖。构建完成后，镜像将导出为 tar 文件。您需要手动将 tar 文件分发到所有 K8s 节点并导入：docker load -i xxx.tar"
+        type="info"
+        show-icon
+        :closable="false"
+        style="margin-bottom: 20px"
+      />
+      <el-form :model="buildForm" label-width="120px">
+        <el-form-item label="基础镜像">
+          <el-select v-model="buildForm.base_image" style="width: 100%">
+            <el-option label="Python 3.11 Slim" value="python:3.11-slim" />
+            <el-option label="Python 3.10 Slim" value="python:3.10-slim" />
+            <el-option label="PyTorch CUDA 11.8" value="pytorch/pytorch:2.1.0-cuda11.8-cudnn8-runtime" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="buildDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitBuild" :loading="buildStore.building">开始构建</el-button>
+      </template>
+    </el-dialog>
+  </div>
+</template>
+
+<script setup>
+import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Refresh, Loading, ArrowDown, CircleClose } from '@element-plus/icons-vue'
+import { useModelsStore } from '@/stores/models'
+import { useBuildStore } from '@/stores/build'
+import { useWebSocket } from '@/composables/useWebSocket'
+import { formatDate, getModelStatusText, getModelStatusType } from '@/utils/formatters'
+
+const router = useRouter()
+const modelsStore = useModelsStore()
+const buildStore = useBuildStore()
+const { isConnected, progress, progressMessage, error, connect, subscribe, unsubscribe, disconnect } = useWebSocket()
+
+const currentPage = ref(1)
+const pageSize = ref(10)
+const createDialogVisible = ref(false)
+const buildDialogVisible = ref(false)
+const submitting = ref(false)
+const uploading = ref(false)
+const currentModel = ref(null)
+const activeTab = ref('github')
+const uploadRef = ref(null)
+const selectedFile = ref(null)
+
+// 上传进度条相关
+const uploadProgress = ref(0)
+const uploadProgressMessage = ref('')
+const uploadError = ref('')
+const uploadProgressDialogVisible = ref(false)
+
+// GitHub 表单
+const githubFormRef = ref(null)
+const githubForm = reactive({
+  name: '',
+  description: '',
+  url: ''
+})
+const githubRules = {
+  name: [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
+  url: [{ required: true, message: '请输入 GitHub URL', trigger: 'blur' }]
+}
+
+// 上传表单
+const uploadFormRef = ref(null)
+const uploadForm = reactive({
+  name: '',
+  description: ''
+})
+const uploadRules = {
+  name: [{ required: true, message: '请输入模型名称', trigger: 'blur' }]
+}
+
+// 其他来源表单
+const otherFormRef = ref(null)
+const otherForm = reactive({
+  name: '',
+  description: '',
+  source_type: 'url',
+  source_path: ''
+})
+const otherRules = {
+  name: [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
+  source_type: [{ required: true, message: '请选择来源类型', trigger: 'change' }],
+  source_path: [{ required: true, message: '请输入路径', trigger: 'blur' }]
+}
+
+const buildForm = reactive({
+  model_type: 'custom',
+  base_image: 'python:3.11-slim'
+})
+
+const handleFileChange = (file) => {
+  selectedFile.value = file.raw
+}
+
+const beforeUpload = (file) => {
+  const maxSize = 10 * 1024 * 1024 * 1024 // 10GB
+  if (file.size > maxSize) {
+    ElMessage.error('文件大小超过 10GB 限制')
+    return false
+  }
+  return true
+}
+
+const showCreateDialog = () => {
+  githubForm.name = ''
+  githubForm.description = ''
+  githubForm.url = ''
+
+  uploadForm.name = ''
+  uploadForm.description = ''
+  selectedFile.value = null
+  if (uploadRef.value) {
+    uploadRef.value.clearFiles()
+  }
+
+  otherForm.name = ''
+  otherForm.description = ''
+  otherForm.source_type = 'url'
+  otherForm.source_path = ''
+
+  activeTab.value = 'github'
+  createDialogVisible.value = true
+}
+
+const submitCreate = async () => {
+  submitting.value = true
+
+  try {
+    if (activeTab.value === 'github') {
+      await githubFormRef.value.validate(async (valid) => {
+        if (!valid) {
+          submitting.value = false
+          return
+        }
+
+        uploading.value = true
+        uploadProgress.value = 0
+        uploadProgressMessage.value = '正在从 GitHub 克隆代码...'
+        uploadError.value = ''
+        uploadProgressDialogVisible.value = true
+        createDialogVisible.value = false
+
+        const formData = new FormData()
+        formData.append('name', githubForm.name)
+        formData.append('description', githubForm.description || '')
+        formData.append('model_type', 'custom')
+        formData.append('url', githubForm.url)
+
+        const onProgress = (progressEvent) => {
+          if (progressEvent.total) {
+            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+            uploadProgress.value = percent
+            uploadProgressMessage.value = `正在从 GitHub 克隆代码... ${percent}%`
+          }
+        }
+
+        await modelsStore.createModelFromUrl(formData, onProgress)
+        uploading.value = false
+        uploadProgress.value = 100
+        uploadProgressMessage.value = 'GitHub 代码克隆完成！'
+        ElMessage.success('模型添加成功')
+        refreshModels()
+      })
+
+    } else if (activeTab.value === 'upload') {
+      await uploadFormRef.value.validate(async (valid) => {
+        if (!valid) {
+          submitting.value = false
+          return
+        }
+
+        if (!selectedFile.value) {
+          ElMessage.error('请选择压缩包文件')
+          submitting.value = false
+          return
+        }
+
+        uploading.value = true
+        uploadProgress.value = 0
+        uploadProgressMessage.value = '准备上传...'
+        uploadError.value = ''
+        uploadProgressDialogVisible.value = true
+        createDialogVisible.value = false
+
+        const formData = new FormData()
+        formData.append('name', uploadForm.name)
+        formData.append('description', uploadForm.description || '')
+        formData.append('model_type', 'custom')
+        formData.append('file', selectedFile.value)
+
+        const onProgress = (progressEvent) => {
+          if (progressEvent.total) {
+            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+            uploadProgress.value = percent
+            const loadedMB = (progressEvent.loaded / 1024 / 1024).toFixed(2)
+            const totalMB = (progressEvent.total / 1024 / 1024).toFixed(2)
+            uploadProgressMessage.value = `正在上传... ${percent}% (${loadedMB}MB / ${totalMB}MB)`
+          }
+        }
+
+        await modelsStore.uploadModel(formData, onProgress)
+        uploading.value = false
+        uploadProgress.value = 100
+        uploadProgressMessage.value = '上传完成！'
+        ElMessage.success('模型上传成功')
+        refreshModels()
+      })
+
+    } else if (activeTab.value === 'other') {
+      await otherFormRef.value.validate(async (valid) => {
+        if (!valid) {
+          submitting.value = false
+          return
+        }
+
+        uploading.value = true
+        uploadProgress.value = 0
+        uploadProgressMessage.value = '正在添加模型...'
+        uploadError.value = ''
+        uploadProgressDialogVisible.value = true
+        createDialogVisible.value = false
+
+        if (otherForm.source_type === 'url') {
+          const formData = new FormData()
+          formData.append('name', otherForm.name)
+          formData.append('description', otherForm.description || '')
+          formData.append('model_type', 'custom')
+          formData.append('url', otherForm.source_path)
+
+          const onProgress = (progressEvent) => {
+            if (progressEvent.total) {
+              const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+              uploadProgress.value = percent
+              uploadProgressMessage.value = `正在下载... ${percent}%`
+            }
+          }
+
+          await modelsStore.createModelFromUrl(formData, onProgress)
+        } else {
+          await modelsStore.createModel({
+            name: otherForm.name,
+            description: otherForm.description,
+            model_type: 'custom',
+            source_type: otherForm.source_type,
+            source_path: otherForm.source_path
+          })
+        }
+        uploading.value = false
+        uploadProgress.value = 100
+        uploadProgressMessage.value = '添加完成！'
+        ElMessage.success('模型添加成功')
+        refreshModels()
+      })
+    }
+
+  } catch (error) {
+    uploading.value = false
+    uploadError.value = error.message || '添加失败'
+    let errorMsg = '添加失败'
+    if (error.response) {
+      if (error.response.status === 413) {
+        errorMsg = '文件太大，超过服务器限制（最大支持 10GB）。建议：\n1. 使用 GitHub 仓库方式\n2. 压缩模型文件\n3. 手动上传到服务器'
+      } else {
+        errorMsg = error.response.data?.detail || error.message
+      }
+    } else {
+      errorMsg = error.message
+    }
+    ElMessage.error(errorMsg)
+  } finally {
+    submitting.value = false
+  }
+}
+
+const buildModel = (row) => {
+  currentModel.value = row
+  buildForm.base_image = 'python:3.11-slim'
+  buildDialogVisible.value = true
+}
+
+// 最小化进度对话框
+const minimizeProgress = () => {
+  buildStore.minimizeProgress()
+  ElMessage.info('构建任务已在后台运行，点击悬浮窗可查看进度')
+}
+
+// 恢复进度对话框
+const restoreProgress = () => {
+  buildStore.restoreProgress()
+}
+
+// 关闭进度对话框
+const closeProgressDialog = () => {
+  buildStore.closeProgress()
+}
+
+// 停止构建
+const stopBuild = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要停止当前构建任务吗？',
+      '确认停止',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    await modelsStore.stopBuild(buildStore.currentModelId)
+    buildStore.stopBuild()
+    ElMessage.info('构建已停止')
+    refreshModels()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('停止构建失败: ' + (error.response?.data?.detail || error.message))
+    }
+  }
+}
+
+const submitBuild = async () => {
+  if (!currentModel.value) return
+
+  buildStore.startBuild('', currentModel.value.id)
+  buildDialogVisible.value = false
+
+  try {
+    const result = await modelsStore.buildModel(currentModel.value.id, buildForm)
+
+    if (result.task_id) {
+      buildStore.currentTaskId = result.task_id
+      subscribe(result.task_id)
+    }
+  } catch (error) {
+    buildStore.setError(error.message || '构建失败')
+    let errorMsg = '构建失败'
+    if (error.response) {
+      errorMsg = error.response.data?.detail || error.message
+    } else if (error.message) {
+      errorMsg = error.message
+    }
+    ElMessage.error(errorMsg)
+  }
+}
+
+const resetModelStatus = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要重置模型 "${row.name}" 的状态吗？这将允许您重新构建。`,
+      '确认重置状态',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    await modelsStore.resetStatus(row.id)
+    ElMessage.success('状态已重置，可以重新构建')
+    refreshModels()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('重置状态失败: ' + (error.response?.data?.detail || error.message))
+    }
+  }
+}
+
+const deleteModel = async (row) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除模型 "${row.name}" 吗？此操作不可恢复。`,
+      '确认删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    await modelsStore.deleteModel(row.id)
+    ElMessage.success('删除成功')
+    refreshModels()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败: ' + (error.response?.data?.detail || error.message))
+    }
+  }
+}
+
+const viewDetail = (row) => {
+  router.push(`/models/${row.id}`)
+}
+
+const refreshModels = () => {
+  modelsStore.fetchModels({
+    skip: (currentPage.value - 1) * pageSize.value,
+    limit: pageSize.value
+  })
+}
+
+const handleSizeChange = (val) => {
+  pageSize.value = val
+  refreshModels()
+}
+
+const handleCurrentChange = (val) => {
+  currentPage.value = val
+  refreshModels()
+}
+
+// 监听 WebSocket 进度变化
+const unwatchProgress = watch(() => progress.value, (newProgress) => {
+  buildStore.updateProgress(newProgress, progressMessage.value)
+
+  if (newProgress === 100) {
+    buildStore.completeBuild()
+    ElMessage.success('构建成功！')
+    refreshModels()
+  }
+})
+
+// 监听 WebSocket 错误
+const unwatchError = watch(() => error.value, (newError) => {
+  if (newError) {
+    buildStore.setError(newError)
+    ElMessage.error('构建失败: ' + newError)
+  }
+})
+
+onMounted(() => {
+  refreshModels()
+})
+
+onUnmounted(() => {
+  unwatchProgress()
+  unwatchError()
+})
+</script>
+
+<style scoped>
+.models-page {
+  padding: 0;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.header-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.pagination {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.text-gray {
+  color: #909399;
+}
+
+.form-tip {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 5px;
+}
+
+.progress-content {
+  padding: 20px 0;
+}
+
+.progress-message {
+  margin-top: 20px;
+  text-align: center;
+  color: #606266;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.progress-error {
+  margin-top: 20px;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* 最小化进度悬浮窗 */
+.minimized-progress {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
+  border-radius: 12px;
+  padding: 12px 20px;
+  box-shadow: 0 4px 20px rgba(64, 158, 255, 0.4);
+  cursor: pointer;
+  z-index: 9999;
+  transition: all 0.3s ease;
+  min-width: 180px;
+}
+
+.minimized-progress:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 25px rgba(64, 158, 255, 0.5);
+}
+
+.minimized-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: white;
+}
+
+.minimized-text {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.minimized-bar {
+  width: 100%;
+}
+
+.minimized-bar :deep(.el-progress-bar__outer) {
+  background-color: rgba(255, 255, 255, 0.3);
+}
+
+.minimized-bar :deep(.el-progress-bar__inner) {
+  background-color: #fff !important;
+}
+</style>
