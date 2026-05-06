@@ -1,2 +1,0 @@
-#!/bin/bash
-sudo docker run -it --rm --runtime=nvidia -e NVIDIA_VISIBLE_DEVICES=1 --ipc=host -v /home:/home -v /nvme_space:/nvme_space -v /nvme_space/sunwei/hf_home:/hf_home -p 7861:7861 sunwei/diffusers bash
