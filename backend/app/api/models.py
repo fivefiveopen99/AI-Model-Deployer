@@ -49,7 +49,7 @@ def find_model_files(directory: str) -> dict:
             filepath = os.path.join(root, file)
             
             # 查找权重文件
-            if file_lower.endswith(('.pt', '.pth', '.onnx', '.engine', '.weights')):
+            if file_lower.endswith(('.pt', '.pth', '.onnx', '.engine', '.weights', '.safetensors')):
                 if model_files['weights'] is None:
                     model_files['weights'] = filepath
             
@@ -103,7 +103,7 @@ def is_git_lfs_pointer(file_path: str) -> bool:
 def find_git_lfs_pointers(directory: str) -> List[str]:
     """找出仍未被 Git LFS 替换成真实内容的模型文件。"""
     pointer_files = []
-    model_exts = (".pt", ".pth", ".onnx", ".engine", ".weights")
+    model_exts = (".pt", ".pth", ".onnx", ".engine", ".weights", ".safetensors")
 
     for root, _, files in os.walk(directory):
         for file in files:
