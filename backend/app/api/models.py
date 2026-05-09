@@ -282,7 +282,6 @@ async def create_finetune_model(
     name: str = Form(...),
     description: Optional[str] = Form(None),
     model_type: str = Form(...),
-    workdir: str = Form(...),
     dockerfile_content: str = Form(...),
     files: List[UploadFile] = File(default=[]),
     db: AsyncSession = Depends(get_db)
@@ -290,8 +289,6 @@ async def create_finetune_model(
     """创建微调工作流模型，直接使用用户填写的 Dockerfile。"""
     if not dockerfile_content.strip():
         raise HTTPException(status_code=400, detail="Dockerfile 不能为空")
-    if not workdir.strip():
-        raise HTTPException(status_code=400, detail="工作目录不能为空")
 
     model_dir = os.path.join(settings.MODEL_STORAGE_PATH, safe_model_dir_name(name))
     workspace_dir = os.path.join(model_dir, "workspace")
@@ -316,7 +313,6 @@ async def create_finetune_model(
                 "model_root_dir": model_dir,
                 "uploaded_workspace": workspace_dir if uploaded_files else None,
                 "runtime_spec": {
-                    "workdir": workdir,
                     "dockerfile_content": dockerfile_content
                 },
                 "model_files": model_files,

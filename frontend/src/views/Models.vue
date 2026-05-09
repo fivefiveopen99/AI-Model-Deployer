@@ -296,9 +296,6 @@
                 </div>
               </div>
             </el-form-item>
-            <el-form-item label="工作目录" prop="workdir">
-              <el-input v-model="finetuneForm.workdir" placeholder="/workspace" />
-            </el-form-item>
             <el-form-item label="Dockerfile" prop="dockerfile_content">
               <el-input
                 v-model="finetuneForm.dockerfile_content"
@@ -423,13 +420,11 @@ const finetuneForm = reactive({
   description: '',
   model_type: 'custom',
   directory_mode: 'none',
-  workdir: '/workspace',
   dockerfile_content: ''
 })
 const finetuneRules = {
   name: [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
   model_type: [{ required: true, message: '请选择模型类型', trigger: 'change' }],
-  workdir: [{ required: true, message: '请输入工作目录', trigger: 'blur' }],
   dockerfile_content: [{ required: true, message: '请填写 Dockerfile', trigger: 'blur' }]
 }
 
@@ -494,7 +489,6 @@ const showCreateDialog = () => {
   finetuneForm.description = ''
   finetuneForm.model_type = 'custom'
   finetuneForm.directory_mode = 'none'
-  finetuneForm.workdir = '/workspace'
   finetuneForm.dockerfile_content = ''
   finetuneDirectoryFiles.value = []
   if (finetuneDirectoryInput.value) {
@@ -658,7 +652,6 @@ const submitCreate = async () => {
         formData.append('name', finetuneForm.name)
         formData.append('description', finetuneForm.description || '')
         formData.append('model_type', finetuneForm.model_type)
-        formData.append('workdir', finetuneForm.workdir)
         formData.append('dockerfile_content', finetuneForm.dockerfile_content)
 
         if (finetuneForm.directory_mode === 'upload') {
