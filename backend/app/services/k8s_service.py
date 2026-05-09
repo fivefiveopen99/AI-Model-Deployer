@@ -279,10 +279,17 @@ class K8sService:
             )
         )
         
+        image_pull_secrets = None
+        if settings.K8S_IMAGE_PULL_SECRET_NAME:
+            image_pull_secrets = [
+                client.V1LocalObjectReference(name=settings.K8S_IMAGE_PULL_SECRET_NAME)
+            ]
+
         template = client.V1PodTemplateSpec(
             metadata=client.V1ObjectMeta(labels={"app": name}),
             spec=client.V1PodSpec(
-                containers=[container]
+                containers=[container],
+                image_pull_secrets=image_pull_secrets
             )
         )
         
@@ -703,207 +710,4 @@ class K8sService:
             print(f"Get worker nodes failed: {e}")
             return []
     
-    async def import_image_to_nodes(
-        self,
-        image_tar_path: str,
-        image_tag: str,
-        ssh_user: str = "root",
-        ssh_key_path: Optional[str] = None,
-        progress_callback: Optional[callable] = None
-    ) -> Dict[str, Any]:
-        """
-        将镜像 tar 文件分发到所有工作节点并导入
-        使用宿主机挂载的 SSH 配置访问节点，异步执行避免阻塞
-
-        Args:
-            image_tar_path: 本地镜像 tar 文件路径
-            image_tag: 镜像标签
-            ssh_user: SSH 用户名
-            ssh_key_path: SSH 私钥路径（可选，默认使用挂载的 ~/.ssh）
-            progress_callback: 进度回调函数
-
-        Returns:
-            导入结果
-        """
-        if not self.is_connected:
-            raise Exception("Kubernetes is not connected")
-
-        if not os.path.exists(image_tar_path):
-            raise Exception(f"Image tar file not found: {image_tar_path}")
-
-        # 获取工作节点
-        worker_nodes = await self.get_worker_nodes()
-
-        if not worker_nodes:
-            return {
-                "success": False,
-                "message": "No worker nodes found",
-                "results": []
-            }
-
-        total_nodes = len(worker_nodes)
-        semaphore = asyncio.Semaphore(3)  # 限制并发数为3，避免过多连接
-
-        async def import_to_single_node(idx: int, node: Dict) -> Dict:
-            """异步导入到单个节点"""
-            async with semaphore:
-                node_name = node["name"]
-                node_ip = node["internal_ip"]
-
-                if not node_ip:
-                    return {
-                        "node": node_name,
-                        "ip": None,
-                        "success": False,
-                        "message": "Node internal IP not found"
-                    }
-
-                if progress_callback:
-                    await progress_callback(
-                        int((idx / total_nodes) * 100),
-                        f"Importing to node {node_name} ({idx + 1}/{total_nodes})..."
-                    )
-
-                try:
-                    remote_tar_path = f"/tmp/{os.path.basename(image_tar_path)}"
-
-                    # 构建 SSH/SCP 基础命令参数
-                    ssh_base_cmd = [
-                        "-o", "StrictHostKeyChecking=no",
-                        "-o", "UserKnownHostsFile=/dev/null",
-                        "-o", "BatchMode=yes"
-                    ]
-
-                    if ssh_key_path and os.path.exists(ssh_key_path):
-                        ssh_base_cmd.extend(["-i", ssh_key_path])
-
-                    # 异步执行 SCP
-                    scp_cmd = ["scp"] + ssh_base_cmd + [
-                        image_tar_path,
-                        f"{ssh_user}@{node_ip}:{remote_tar_path}"
-                    ]
-
-                    scp_process = await asyncio.create_subprocess_exec(
-                        *scp_cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
-                    )
-
-                    try:
-                        scp_stdout, scp_stderr = await asyncio.wait_for(
-                            scp_process.communicate(),
-                            timeout=600  # 10分钟超时
-                        )
-                    except asyncio.TimeoutError:
-                        scp_process.kill()
-                        await scp_process.wait()
-                        return {
-                            "node": node_name,
-                            "ip": node_ip,
-                            "success": False,
-                            "message": "SCP operation timed out (10min)"
-                        }
-
-                    if scp_process.returncode != 0:
-                        return {
-                            "node": node_name,
-                            "ip": node_ip,
-                            "success": False,
-                            "message": f"SCP failed: {scp_stderr.decode('utf-8', errors='ignore')}"
-                        }
-
-                    # 异步执行 SSH 导入命令。docker save 的标签通常会被 ctr 保留，
-                    # 这里只在需要时按明确候选名补标签，避免误标记节点上的其他镜像。
-                    import_cmd = f"""
-                    ctr -n k8s.io images import {remote_tar_path}
-                    IMPORT_EXIT=$?
-                    if [ $IMPORT_EXIT -eq 0 ]; then
-                        if ctr -n k8s.io images get {image_tag} >/dev/null 2>&1; then
-                            echo "Image available: {image_tag}"
-                        elif ctr -n k8s.io images get docker.io/library/{image_tag} >/dev/null 2>&1; then
-                            ctr -n k8s.io images tag docker.io/library/{image_tag} {image_tag}
-                            echo "Tagged image: docker.io/library/{image_tag} -> {image_tag}"
-                        else
-                            echo "Warning: imported archive, but expected tag was not found: {image_tag}" >&2
-                        fi
-                    fi
-                    rm -f {remote_tar_path}
-                    exit $IMPORT_EXIT
-                    """
-                    
-                    ssh_cmd = ["ssh"] + ssh_base_cmd + [
-                        f"{ssh_user}@{node_ip}",
-                        import_cmd
-                    ]
-
-                    ssh_process = await asyncio.create_subprocess_exec(
-                        *ssh_cmd,
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
-                    )
-
-                    try:
-                        ssh_stdout, ssh_stderr = await asyncio.wait_for(
-                            ssh_process.communicate(),
-                            timeout=300  # 5分钟超时
-                        )
-                    except asyncio.TimeoutError:
-                        ssh_process.kill()
-                        await ssh_process.wait()
-                        return {
-                            "node": node_name,
-                            "ip": node_ip,
-                            "success": False,
-                            "message": "SSH import timed out (5min)"
-                        }
-
-                    if ssh_process.returncode == 0:
-                        return {
-                            "node": node_name,
-                            "ip": node_ip,
-                            "success": True,
-                            "message": f"Image imported and tagged as {image_tag}"
-                        }
-                    else:
-                        return {
-                            "node": node_name,
-                            "ip": node_ip,
-                            "success": False,
-                            "message": f"Import failed: {ssh_stderr.decode('utf-8', errors='ignore')}"
-                        }
-
-                except Exception as e:
-                    return {
-                        "node": node_name,
-                        "ip": node_ip,
-                        "success": False,
-                        "message": f"Error: {str(e)}"
-                    }
-
-        # 并发执行所有节点的导入任务
-        tasks = [import_to_single_node(idx, node) for idx, node in enumerate(worker_nodes)]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # 处理异常结果
-        processed_results = []
-        for idx, result in enumerate(results):
-            if isinstance(result, Exception):
-                processed_results.append({
-                    "node": worker_nodes[idx]["name"],
-                    "ip": worker_nodes[idx].get("internal_ip"),
-                    "success": False,
-                    "message": f"Exception: {str(result)}"
-                })
-            else:
-                processed_results.append(result)
-
-        # 检查是否所有节点都成功
-        success_count = sum(1 for r in processed_results if r["success"])
-
-        return {
-            "success": success_count == total_nodes,
-            "message": f"{success_count}/{total_nodes} nodes imported successfully",
-            "results": processed_results
-        }
-
 k8s_service = K8sService()

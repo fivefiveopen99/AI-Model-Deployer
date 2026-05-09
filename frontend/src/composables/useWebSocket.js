@@ -6,6 +6,8 @@ export function useWebSocket() {
   const progress = ref(0)
   const progressMessage = ref('')
   const error = ref(null)
+  const lastMessage = ref(null)
+  const logHistory = ref([])
   const pendingSubscriptions = new Set()
   let reconnectTimer = null
   let manuallyClosed = false
@@ -31,12 +33,21 @@ export function useWebSocket() {
 
     ws.value.onmessage = (event) => {
       const data = JSON.parse(event.data)
+      lastMessage.value = data
       
       if (data.type === 'progress') {
         progress.value = data.progress
         progressMessage.value = data.message
+        if (data.data?.log) {
+          logHistory.value.push(data.data.log)
+          if (logHistory.value.length > 1000) {
+            logHistory.value.splice(0, logHistory.value.length - 1000)
+          }
+        }
       } else if (data.type === 'error') {
         error.value = data.message
+      } else if (data.type === 'log_history') {
+        logHistory.value = data.logs || []
       }
     }
 
@@ -100,6 +111,8 @@ export function useWebSocket() {
     progress,
     progressMessage,
     error,
+    lastMessage,
+    logHistory,
     connect,
     subscribe,
     unsubscribe,

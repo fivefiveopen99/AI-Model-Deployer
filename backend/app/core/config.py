@@ -18,12 +18,16 @@ class Settings(BaseSettings):
     # Redis (for Celery)
     REDIS_URL: str = "redis://localhost:6379/0"
     
-    # Docker Configuration
-    LOCAL_IMAGE_PATH: str = "./data/images"
+    # Docker Registry Configuration
+    DOCKER_REGISTRY_URL: str = "10.10.25.69:5000/ai-models"
+    DOCKER_REGISTRY_PUSH_URL: Optional[str] = "localhost:5000/ai-models"
+    DOCKER_REGISTRY_USERNAME: str = ""
+    DOCKER_REGISTRY_PASSWORD: str = ""
     
     # Kubernetes
     K8S_CONFIG_PATH: Optional[str] = None
     K8S_NAMESPACE: str = "default"
+    K8S_IMAGE_PULL_SECRET_NAME: Optional[str] = ""
     
     # Model Storage
     MODEL_STORAGE_PATH: str = "./data/models"
@@ -40,4 +44,3 @@ settings = Settings()
 
 os.makedirs(settings.MODEL_STORAGE_PATH, exist_ok=True)
 os.makedirs(settings.BUILD_CONTEXT_PATH, exist_ok=True)
-os.makedirs(settings.LOCAL_IMAGE_PATH, exist_ok=True)

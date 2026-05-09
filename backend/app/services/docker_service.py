@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import json
+import socket
 from typing import Optional, Dict, Any, Callable
 import asyncio
 from datetime import datetime
@@ -817,6 +818,14 @@ class DockerService:
                     if is_stderr:
                         error_lines.append(line_str)
                     step += 1
+                    if progress_callback:
+                        progress = min(50 + step, 85)
+                        await progress_callback(
+                            progress,
+                            line_str,
+                            {"log": line_str, "stream": "stderr" if is_stderr else "stdout"},
+                            persist_status=False
+                        )
                     # 每10行输出更新一次进度 (50% -> 85%)
                     if progress_callback and step % 10 == 0:
                         progress = min(50 + step, 85)
@@ -875,6 +884,131 @@ class DockerService:
             except:
                 pass
         return {"Id": "", "Size": 0}
+
+    async def push_image_to_registry(self, image_tag: str, progress_callback=None) -> Dict[str, Any]:
+        """Tag and push a built image to the configured Docker registry."""
+        registry_url = settings.DOCKER_REGISTRY_URL.rstrip("/")
+        push_registry_url = (settings.DOCKER_REGISTRY_PUSH_URL or settings.DOCKER_REGISTRY_URL).rstrip("/")
+        if not registry_url:
+            raise Exception("DOCKER_REGISTRY_URL is not configured")
+
+        if ":" not in image_tag:
+            raise Exception(f"Invalid image tag: {image_tag}")
+
+        image_name, tag = image_tag.rsplit(":", 1)
+        registry_image = f"{registry_url}/{image_name}:{tag}"
+        push_image = f"{push_registry_url}/{image_name}:{tag}"
+        registry_host = push_registry_url.split("/", 1)[0]
+
+        if progress_callback:
+            await progress_callback(88, f"Logging in to registry {registry_host}...")
+
+        self._ensure_registry_host_resolves(registry_host)
+
+        if settings.DOCKER_REGISTRY_USERNAME and settings.DOCKER_REGISTRY_PASSWORD:
+            await self._docker_login_async(
+                registry_host,
+                settings.DOCKER_REGISTRY_USERNAME,
+                settings.DOCKER_REGISTRY_PASSWORD
+            )
+
+        if progress_callback:
+            await progress_callback(90, f"Tagging image as {push_image}...")
+
+        await self._run_docker_command_async(
+            ["docker", "tag", image_tag, push_image],
+            "Docker tag failed"
+        )
+
+        if progress_callback:
+            await progress_callback(92, f"Pushing image to {push_registry_url}...")
+
+        await self._run_docker_command_async(
+            ["docker", "push", push_image],
+            "Docker push failed",
+            progress_callback=progress_callback,
+            progress_start=92,
+            progress_end=98
+        )
+
+        return {
+            "success": True,
+            "registry": registry_url,
+            "push_registry": push_registry_url,
+            "registry_host": registry_host,
+            "source_image": image_tag,
+            "push_image": push_image,
+            "registry_image": registry_image
+        }
+
+    def _ensure_registry_host_resolves(self, registry_host: str):
+        host = registry_host.split(":", 1)[0]
+        try:
+            socket.gethostbyname(host)
+        except socket.gaierror as e:
+            raise Exception(
+                f"Registry host {host} cannot be resolved. "
+                "Set DOCKER_REGISTRY_URL to a reachable registry address or configure DNS/hosts, "
+                "then recreate the backend container."
+            ) from e
+
+    async def _docker_login_async(self, registry_host: str, username: str, password: str):
+        process = await asyncio.create_subprocess_exec(
+            "docker", "login", registry_host, "-u", username, "--password-stdin",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate(f"{password}\n".encode("utf-8"))
+
+        if process.returncode != 0:
+            error_msg = stderr.decode("utf-8", errors="ignore") or stdout.decode("utf-8", errors="ignore")
+            raise Exception(f"Docker login failed for {registry_host}: {error_msg.strip()}")
+
+    async def _run_docker_command_async(
+        self,
+        command: list,
+        error_prefix: str,
+        progress_callback=None,
+        progress_start: int = 0,
+        progress_end: int = 100
+    ):
+        process = await asyncio.create_subprocess_exec(
+            *command,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+
+        output_lines = []
+        line_count = 0
+
+        async def read_stream(stream):
+            nonlocal line_count
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                line_str = line.decode("utf-8", errors="ignore").strip()
+                if not line_str:
+                    continue
+                print(f"Docker command: {line_str}")
+                output_lines.append(line_str)
+                line_count += 1
+                if progress_callback:
+                    progress = min(progress_start + line_count, progress_end)
+                    await progress_callback(
+                        progress,
+                        line_str,
+                        {"log": line_str},
+                        persist_status=line_count % 5 == 0
+                    )
+
+        await asyncio.gather(read_stream(process.stdout), read_stream(process.stderr))
+        await process.wait()
+
+        if process.returncode != 0:
+            error_msg = "\n".join(output_lines[-10:]) if output_lines else "Unknown error"
+            raise Exception(f"{error_prefix}: {error_msg}")
 
     async def _prepare_model_files(
         self,
@@ -1380,37 +1514,6 @@ joblib==1.3.2
             base_requirements += f"{dep}\n"
 
         return base_requirements
-
-    async def export_image_to_tar(self, image_tag: str, output_path: str) -> str:
-        """导出镜像为 tar 文件，用于手动分发到 K8s 节点"""
-        if not self.is_connected:
-            raise Exception("Docker is not connected")
-
-        try:
-            tar_filename = f"{image_tag.replace(':', '_').replace('/', '_')}.tar"
-            tar_path = os.path.join(output_path, tar_filename)
-
-            # 使用异步命令行导出镜像
-            await self._export_image_async(image_tag, tar_path)
-
-            return tar_path
-        except Exception as e:
-            print(f"Export failed: {e}")
-            raise
-
-    async def _export_image_async(self, image_tag: str, tar_path: str):
-        """异步导出镜像"""
-        import asyncio
-        process = await asyncio.create_subprocess_exec(
-            'docker', 'save', '-o', tar_path, image_tag,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            error_msg = stderr.decode('utf-8', errors='ignore') if stderr else "Unknown error"
-            raise Exception(f"Docker save failed: {error_msg}")
 
     def remove_image(self, image_tag: str) -> bool:
         if not self.is_connected:

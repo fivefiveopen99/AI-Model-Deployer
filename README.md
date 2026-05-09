@@ -50,7 +50,7 @@ cd ai-model-deployer
 
 # 复制环境变量配置
 cp .env.example .env
-# 编辑 .env 文件，配置你的 K8s 和 SSH 分发参数
+# 编辑 .env 文件，配置你的 K8s 和 Registry 参数
 
 # 启动服务
 docker-compose up -d
@@ -109,9 +109,15 @@ npm run dev
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
+| DOCKER_REGISTRY_URL | 内置 Docker Registry 仓库地址 | 10.10.25.69:5000/ai-models |
+| DOCKER_REGISTRY_PUSH_URL | 后端 Docker daemon 推送地址 | localhost:5000/ai-models |
+| DOCKER_REGISTRY_USERNAME | Registry 推送账号，内置 registry 默认留空 | 空 |
+| DOCKER_REGISTRY_PASSWORD | Registry 推送密码，内置 registry 默认留空 | 空 |
 | K8S_CONFIG_PATH | K8s配置文件路径 | ~/.kube/config |
 | K8S_NAMESPACE | 默认命名空间 | default |
-| K8S_SSH_USER | 用于分发镜像到节点的 SSH 用户 | root |
+| K8S_IMAGE_PULL_SECRET_NAME | K8s 拉取私有镜像的 Secret 名称，内置 registry 默认留空 | 空 |
+
+Compose 会启动一个 `registry:2` 服务并通过宿主机 `5000` 端口暴露。后端 Docker daemon 通过 `localhost:5000/ai-models` 推送镜像，模型部署记录使用 `10.10.25.69:5000/ai-models/ai-model:<build_id>`。这是 HTTP registry，K8s 节点的容器运行时需要把 `10.10.25.69:5000` 配置为 insecure registry。
 
 ## 支持的模型类型
 

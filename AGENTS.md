@@ -4,20 +4,20 @@ This file is the project-level context file for Codex and other coding agents. R
 
 ## Project Summary
 
-AI Model Deployer is a FastAPI + Vue application for managing AI model projects, packaging them into Docker images, distributing those images to Kubernetes worker nodes, and creating Kubernetes deployments for online inference.
+AI Model Deployer is a FastAPI + Vue application for managing AI model projects, packaging them into Docker images, pushing those images to the bundled Docker Registry service, and creating Kubernetes deployments for online inference.
 
 Core goals:
 
 - Register models from uploaded archives, GitHub repositories, direct URLs, or manually provided paths.
 - Auto-detect model project files and build a Docker image that exposes a FastAPI inference service.
-- Export the built image as a tar file and import it into Kubernetes worker nodes over SSH/SCP.
+- Push built images to the bundled registry at `10.10.25.69:5000/ai-models`.
 - Create Kubernetes Deployment and NodePort Service resources for model serving.
 - Provide a web UI for model management, deployment management, logs, scaling, and prediction testing.
 
 Important current design decision:
 
-- There is no local Docker registry service in this project. Image distribution is done by `docker save` plus SSH/SCP plus `ctr -n k8s.io images import`.
-- The model status value `pushing` is still used internally for backward compatibility, but the UI displays it as "distributing".
+- Image distribution is done through the bundled `registry:2` service. The backend tags `ai-model:{build_id}` as `10.10.25.69:5000/ai-models/ai-model:{build_id}` and pushes it.
+- The model status value `pushing` is still used internally for registry push progress and backward compatibility.
 
 ## Repository Layout
 
@@ -49,7 +49,7 @@ Important current design decision:
 Runtime/generated paths that should not be committed:
 
 - `data/`: SQLite DB, uploaded archives, extracted model projects, Docker build contexts, image tar files, model weights.
-- `.env`: local proxy/K8s/SSH configuration.
+- `.env`: local proxy, K8s, and registry configuration.
 - `node_modules/`, `dist/`, `__pycache__/`, virtualenvs, and other caches.
 
 ## Technology Stack
@@ -78,7 +78,7 @@ Runtime:
 
 - Docker Compose starts `backend`, `frontend`, and `redis`.
 - Frontend production image serves static assets through nginx and proxies `/api` to `backend:8000`.
-- Backend mounts Docker socket, Docker binary, kube config, SSH config, and `./data`.
+- Backend mounts Docker socket, Docker binary, kube config, and `./data`.
 
 ## Main Runtime Commands
 
@@ -135,13 +135,15 @@ Main config source:
 Key backend settings:
 
 - `DATABASE_URL`: default `sqlite+aiosqlite:///./data/models.db`
-- `LOCAL_IMAGE_PATH`: default `./data/images`
+- `DOCKER_REGISTRY_URL`: default `10.10.25.69:5000/ai-models`
+- `DOCKER_REGISTRY_PUSH_URL`: default `localhost:5000/ai-models`
+- `DOCKER_REGISTRY_USERNAME`: default empty for bundled registry
+- `DOCKER_REGISTRY_PASSWORD`: default empty for bundled registry
 - `MODEL_STORAGE_PATH`: default `./data/models`
 - `BUILD_CONTEXT_PATH`: default `./data/builds`
 - `K8S_CONFIG_PATH`: optional kube config path
 - `K8S_NAMESPACE`: default `default`
-- `K8S_SSH_USER`: Compose-provided SSH user for worker node import, default `root`
-- `K8S_SSH_KEY_PATH`: optional env var read during image import, not declared in `Settings`
+- `K8S_IMAGE_PULL_SECRET_NAME`: default empty for bundled registry
 
 Proxy environment:
 
@@ -241,10 +243,10 @@ Build steps:
 6. Select a specialized build adapter, or fall back to generic generated FastAPI service.
 7. Run `docker build -t ai-model:{build_id} {build_context}`.
 8. Store Docker image metadata on the model row.
-9. Set status to `pushing` while exporting/distributing.
-10. Run `docker save` to `data/images/ai-model_{build_id}.tar`.
-11. If Kubernetes is connected, call `k8s_service.import_image_to_nodes()`.
-12. Mark model as `ready` even if auto-distribution fails, but include manual import instructions in `config`.
+9. Set status to `pushing` while publishing to the registry.
+10. Run `docker tag` and `docker push` to `localhost:5000/ai-models/ai-model:{build_id}`; store the deployable image as `10.10.25.69:5000/ai-models/ai-model:{build_id}`.
+11. Store registry image metadata on the model row.
+12. Mark model as `ready` after the registry push succeeds; mark it `failed` if the push fails.
 
 Build context cleanup:
 
@@ -252,16 +254,16 @@ Build context cleanup:
 
 Image naming:
 
-- Built image tag format: `ai-model:{build_id}`.
-- `docker_image` becomes `ai-model`.
+- Local built image tag format: `ai-model:{build_id}`.
+- Registry image tag format: `10.10.25.69:5000/ai-models/ai-model:{build_id}`.
+- `docker_image` becomes `10.10.25.69:5000/ai-models/ai-model`.
 - `docker_image_tag` becomes `{build_id}`.
 
 Stored config values after build may include:
 
-- `distribution_mode: "scp"`
-- `image_tar_path`
-- `import_command`
-- `distribution_result`
+- `distribution_mode: "registry"`
+- `registry_image`
+- `push_result`
 
 ## Docker Service Details
 
@@ -274,7 +276,7 @@ Responsibilities:
 - Check Docker CLI availability.
 - Detect generic model type from project contents.
 - Build image through Docker CLI.
-- Export image tar with `docker save`.
+- Push built images to the registry with Docker CLI.
 - Remove images when model rows are deleted.
 - Generate Dockerfiles and FastAPI service wrappers.
 
@@ -321,28 +323,25 @@ Deployment behavior:
   - Deployment: `model-{model_id}-{deployment_name}`
   - Service: `{deployment_name}-svc` as created from the deployment name in `_wait_for_deployment`; actual service name returned is `model-{model_id}-{deployment_name}-svc`.
 - Container name: `model`.
-- Container image: `ai-model:{build_id}` for local-node images.
+- Container image: `10.10.25.69:5000/ai-models/ai-model:{build_id}` for new builds.
 - `image_pull_policy` is `Never` when image starts with `ai-model:`, otherwise `IfNotPresent`.
+- Pod specs include `imagePullSecrets` when `K8S_IMAGE_PULL_SECRET_NAME` is configured.
 - Probes use `GET /health`.
 - Service type is `NodePort`.
 - Endpoint is built from the first non-control-plane node InternalIP and assigned NodePort.
 
-Image distribution to nodes:
+Image distribution:
 
-- `import_image_to_nodes(image_tar_path, image_tag, ssh_user, ssh_key_path, progress_callback)`.
-- Gets worker nodes from Kubernetes.
-- Copies tar to `/tmp/{tar_name}` on each worker via `scp`.
-- Imports into containerd with `ctr -n k8s.io images import`.
-- If needed, tags `docker.io/library/{image_tag}` back to `{image_tag}`.
-- Removes remote tar after import.
-- Runs imports concurrently with a semaphore limit of 3.
+- New builds are pushed to the bundled registry and pulled by Kubernetes nodes.
+- The bundled registry is unauthenticated by default, so no image pull secret is required unless an external private registry is configured.
 
 Prerequisites for deployment:
 
 - Backend container needs access to Docker socket and Docker CLI.
 - Backend container needs kube config or in-cluster config.
-- Backend container needs SSH access to K8s worker nodes.
-- K8s workers must use containerd namespace `k8s.io` for the current import command.
+- Backend host Docker daemon pushes through `localhost:5000`.
+- K8s worker nodes need network access to `10.10.25.69:5000`.
+- Because the bundled registry is HTTP, Kubernetes node Docker/containerd must allow `10.10.25.69:5000` as an insecure registry.
 
 ## Deployment Lifecycle
 
@@ -487,7 +486,6 @@ When deleting a model through the API:
 - Original archive is removed if present.
 - GitHub clone parent directory is removed when applicable.
 - Docker image is removed if image metadata is present.
-- Image tar file is removed if `config.image_tar_path` exists.
 - DB row is deleted.
 
 ## Git and Workspace Notes
@@ -570,10 +568,9 @@ Note: local `npm run build` requires `frontend/node_modules`. In this workspace,
 - Prefer existing routers, services, schemas, stores, and formatters over introducing parallel abstractions.
 - Keep model build and K8s deploy workflows consistent with WebSocket progress updates.
 - If changing model statuses, account for existing SQLite enum values and frontend display mappings.
-- If changing image distribution, inspect both `run_build_task()` and `K8sService.import_image_to_nodes()`.
+- If changing image distribution, inspect both `run_build_task()` and `DockerService.push_image_to_registry()`.
 - If changing generated model services, verify they expose `/health` and compatible prediction endpoints.
-- Do not reintroduce a Docker registry unless explicitly requested; current design avoids node registry configuration.
+- Do not reintroduce node-side image import distribution unless explicitly requested.
 - Do not edit extracted third-party model repos under `data/models/*/extracted` unless the task explicitly targets them.
 - Do not delete code only because it looks unused without checking references and runtime hooks.
 - Ask before destructive cleanup of runtime artifacts, images, containers, volumes, or model data.
-

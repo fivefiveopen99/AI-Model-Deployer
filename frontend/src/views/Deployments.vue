@@ -113,7 +113,7 @@
     </el-dialog>
 
     <!-- 创建部署对话框 -->
-    <el-dialog v-model="createDialogVisible" title="创建部署" width="600px">
+    <el-dialog v-model="createDialogVisible" title="创建部署" width="720px">
       <el-form :model="form" :rules="rules" ref="formRef" label-width="100px">
         <el-form-item label="部署名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入部署名称" />
@@ -135,22 +135,75 @@
           <el-input-number v-model="form.replicas" :min="1" :max="100" />
         </el-form-item>
         <el-form-item label="资源配置">
-          <el-collapse>
-            <el-collapse-item title="CPU / 内存配置">
-              <el-form-item label="CPU限制">
-                <el-input v-model="resources.limits.cpu" placeholder="500m" />
-              </el-form-item>
-              <el-form-item label="内存限制">
-                <el-input v-model="resources.limits.memory" placeholder="512Mi" />
-              </el-form-item>
-              <el-form-item label="CPU请求">
-                <el-input v-model="resources.requests.cpu" placeholder="250m" />
-              </el-form-item>
-              <el-form-item label="内存请求">
-                <el-input v-model="resources.requests.memory" placeholder="256Mi" />
-              </el-form-item>
-            </el-collapse-item>
-          </el-collapse>
+          <div class="resource-panel">
+            <div class="resource-grid">
+              <div class="resource-field">
+                <label>CPU 请求</label>
+                <el-select v-model="resources.requests.cpu" placeholder="不设置" clearable>
+                  <el-option
+                    v-for="option in cpuOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </div>
+              <div class="resource-field">
+                <label>CPU 限制</label>
+                <el-select v-model="resources.limits.cpu" placeholder="不设置" clearable>
+                  <el-option
+                    v-for="option in cpuOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </div>
+              <div class="resource-field">
+                <label>内存请求</label>
+                <el-select v-model="resources.requests.memory" placeholder="不设置" clearable>
+                  <el-option
+                    v-for="option in memoryOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </div>
+              <div class="resource-field">
+                <label>内存限制</label>
+                <el-select v-model="resources.limits.memory" placeholder="不设置" clearable>
+                  <el-option
+                    v-for="option in memoryOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </div>
+              <div class="resource-field">
+                <label>显卡类型</label>
+                <el-select v-model="resources.gpu.resourceName" @change="handleGpuTypeChange">
+                  <el-option label="不使用显卡" value="" />
+                  <el-option label="NVIDIA GPU" value="nvidia.com/gpu" />
+                </el-select>
+              </div>
+              <div class="resource-field">
+                <label>显卡数量</label>
+                <el-select
+                  v-model="resources.gpu.count"
+                  :disabled="!resources.gpu.resourceName"
+                >
+                  <el-option
+                    v-for="option in gpuCountOptions"
+                    :key="option.value"
+                    :label="option.label"
+                    :value="option.value"
+                  />
+                </el-select>
+              </div>
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="环境变量">
           <div v-for="(env, index) in envVars" :key="index" class="env-row">
@@ -229,10 +282,39 @@ const form = reactive({
 
 const resources = reactive({
   limits: { cpu: '', memory: '' },
-  requests: { cpu: '', memory: '' }
+  requests: { cpu: '', memory: '' },
+  gpu: { resourceName: '', count: 0 }
 })
 
 const envVars = ref([])
+
+const cpuOptions = [
+  { label: '0.25 核', value: '250m' },
+  { label: '0.5 核', value: '500m' },
+  { label: '1 核', value: '1' },
+  { label: '2 核', value: '2' },
+  { label: '4 核', value: '4' },
+  { label: '8 核', value: '8' }
+]
+
+const memoryOptions = [
+  { label: '256 MiB', value: '256Mi' },
+  { label: '512 MiB', value: '512Mi' },
+  { label: '1 GiB', value: '1Gi' },
+  { label: '2 GiB', value: '2Gi' },
+  { label: '4 GiB', value: '4Gi' },
+  { label: '8 GiB', value: '8Gi' },
+  { label: '16 GiB', value: '16Gi' },
+  { label: '32 GiB', value: '32Gi' }
+]
+
+const gpuCountOptions = [
+  { label: '0 张', value: 0 },
+  { label: '1 张', value: 1 },
+  { label: '2 张', value: 2 },
+  { label: '4 张', value: 4 },
+  { label: '8 张', value: 8 }
+]
 
 const rules = {
   name: [{ required: true, message: '请输入部署名称', trigger: 'blur' }],
@@ -252,6 +334,7 @@ const showCreateDialog = () => {
   form.replicas = 1
   resources.limits = { cpu: '', memory: '' }
   resources.requests = { cpu: '', memory: '' }
+  resources.gpu = { resourceName: '', count: 0 }
   envVars.value = []
   createDialogVisible.value = true
   modelsStore.fetchModels()
@@ -263,6 +346,29 @@ const addEnv = () => {
 
 const removeEnv = (index) => {
   envVars.value.splice(index, 1)
+}
+
+const handleGpuTypeChange = (resourceName) => {
+  resources.gpu.count = resourceName ? 1 : 0
+}
+
+const buildResourceConfig = () => {
+  const limits = {}
+  const requests = {}
+
+  if (resources.limits.cpu) limits.cpu = resources.limits.cpu
+  if (resources.limits.memory) limits.memory = resources.limits.memory
+  if (resources.requests.cpu) requests.cpu = resources.requests.cpu
+  if (resources.requests.memory) requests.memory = resources.requests.memory
+
+  if (resources.gpu.resourceName && resources.gpu.count > 0) {
+    limits[resources.gpu.resourceName] = String(resources.gpu.count)
+  }
+
+  return {
+    limits,
+    requests
+  }
 }
 
 const submitCreate = async () => {
@@ -281,16 +387,7 @@ const submitCreate = async () => {
         
         const data = {
           ...form,
-          resources: {
-            limits: resources.limits.cpu || resources.limits.memory ? {
-              cpu: resources.limits.cpu || undefined,
-              memory: resources.limits.memory || undefined
-            } : {},
-            requests: resources.requests.cpu || resources.requests.memory ? {
-              cpu: resources.requests.cpu || undefined,
-              memory: resources.requests.memory || undefined
-            } : {}
-          },
+          resources: buildResourceConfig(),
           env_vars: envVarsObj
         }
         
@@ -499,6 +596,36 @@ const stopPolling = () => {
   margin-bottom: 10px;
 }
 
+.resource-panel {
+  width: 100%;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  padding: 16px;
+  background: #fafafa;
+}
+
+.resource-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.resource-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.resource-field label {
+  font-size: 13px;
+  color: #606266;
+  line-height: 1;
+}
+
+.resource-field :deep(.el-select) {
+  width: 100%;
+}
+
 .scale-content {
   padding: 20px 0;
 }
@@ -524,5 +651,11 @@ const stopPolling = () => {
 
 .progress-error {
   margin-top: 20px;
+}
+
+@media (max-width: 720px) {
+  .resource-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

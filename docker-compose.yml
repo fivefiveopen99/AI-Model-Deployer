@@ -10,27 +10,30 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/bin/docker:/usr/bin/docker:ro
       - ~/.kube:/root/.kube:ro
-      - ~/.ssh:/root/.ssh:ro
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./data/models.db
       - REDIS_URL=redis://redis:6379/0
-      - LOCAL_IMAGE_PATH=${LOCAL_IMAGE_PATH:-./data/images}
+      - DOCKER_REGISTRY_URL=${DOCKER_REGISTRY_URL:-10.10.25.69:5000/ai-models}
+      - DOCKER_REGISTRY_PUSH_URL=${DOCKER_REGISTRY_PUSH_URL:-localhost:5000/ai-models}
+      - DOCKER_REGISTRY_USERNAME=${DOCKER_REGISTRY_USERNAME:-}
+      - DOCKER_REGISTRY_PASSWORD=${DOCKER_REGISTRY_PASSWORD:-}
       - K8S_CONFIG_PATH=${K8S_CONFIG_PATH:-}
       - K8S_NAMESPACE=${K8S_NAMESPACE:-default}
+      - K8S_IMAGE_PULL_SECRET_NAME=${K8S_IMAGE_PULL_SECRET_NAME:-}
       - DOCKER_HOST=unix:///var/run/docker.sock
-      - K8S_SSH_USER=${K8S_SSH_USER:-root}
       - HTTP_PROXY=${BACKEND_HTTP_PROXY:-}
       - HTTPS_PROXY=${BACKEND_HTTPS_PROXY:-}
       - ALL_PROXY=${BACKEND_ALL_PROXY:-}
-      - NO_PROXY=${BACKEND_NO_PROXY:-localhost,127.0.0.1,redis,backend,frontend,host.docker.internal,10.10.25.69}
+      - NO_PROXY=${BACKEND_NO_PROXY:-localhost,127.0.0.1,redis,backend,frontend,registry,host.docker.internal,10.10.25.69}
       - http_proxy=${BACKEND_HTTP_PROXY:-}
       - https_proxy=${BACKEND_HTTPS_PROXY:-}
       - all_proxy=${BACKEND_ALL_PROXY:-}
-      - no_proxy=${BACKEND_NO_PROXY:-localhost,127.0.0.1,redis,backend,frontend,host.docker.internal,10.10.25.69}
+      - no_proxy=${BACKEND_NO_PROXY:-localhost,127.0.0.1,redis,backend,frontend,registry,host.docker.internal,10.10.25.69}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
       - redis
+      - registry
     networks:
       - ai-model-deployer
 
@@ -54,8 +57,18 @@ services:
     networks:
       - ai-model-deployer
 
+  registry:
+    image: registry:2
+    ports:
+      - "5000:5000"
+    volumes:
+      - registry_data:/var/lib/registry
+    networks:
+      - ai-model-deployer
+
 volumes:
   redis_data:
+  registry_data:
 
 networks:
   ai-model-deployer:
