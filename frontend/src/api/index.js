@@ -13,6 +13,11 @@ export const modelsApi = {
   getList: (params) => api.get('/models', { params }),
   getDetail: (id) => api.get(`/models/${id}`),
   create: (data) => api.post('/models', data),
+  createFinetune: (formData, onProgress) => api.post('/models/finetune', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 3600000,
+    onUploadProgress: onProgress
+  }),
   update: (id, data) => api.put(`/models/${id}`, data),
   delete: (id) => api.delete(`/models/${id}`),
   upload: (formData, onProgress) => api.post('/models/upload', formData, {

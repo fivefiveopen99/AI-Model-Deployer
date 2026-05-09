@@ -697,6 +697,8 @@ class DockerService:
             raise Exception("Docker is not connected")
 
         config = config or {}
+        runtime_spec = config.get("runtime_spec") or {}
+        custom_dockerfile = runtime_spec.get("dockerfile_content")
         build_id = f"{model_name.lower().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         image_tag = f"ai-model:{build_id}"
 
@@ -708,57 +710,69 @@ class DockerService:
             if progress_callback:
                 await progress_callback(10, "Preparing build context...")
 
-            # 准备模型文件
-            model_dir = os.path.join(build_context, "model")
-            os.makedirs(model_dir, exist_ok=True)
-
-            await self._prepare_model_files(source_path, source_type, model_dir, progress_callback)
-
-            # 自动检测模型类型
-            if progress_callback:
-                await progress_callback(20, "Detecting model type...")
-
-            detected_type = self.detect_model_type(model_dir)
-            if detected_type != "custom":
-                model_type = detected_type
+            if custom_dockerfile:
                 if progress_callback:
-                    await progress_callback(25, f"Detected model type: {model_type}")
+                    await progress_callback(20, "Preparing user-provided Dockerfile build context...")
 
-            adapter = self._select_build_adapter(model_dir, base_image, config)
+                if source_path and os.path.exists(source_path):
+                    await self._prepare_model_files(source_path, source_type, build_context, progress_callback)
 
-            if adapter:
+                self._write_text(os.path.join(build_context, "Dockerfile"), custom_dockerfile)
+
                 if progress_callback:
-                    await progress_callback(30, adapter["message"])
-
-                self._copy_project_to_context(adapter["project_dir"], build_context)
-                if adapter.get("api"):
-                    self._write_text(os.path.join(build_context, "api.py"), adapter["api"])
-                if adapter.get("dockerfile"):
-                    self._write_text(os.path.join(build_context, "Dockerfile"), adapter["dockerfile"])
-
-                shutil.rmtree(model_dir, ignore_errors=True)
+                    await progress_callback(35, "Using user-provided Dockerfile directly...")
             else:
-                # 使用自动生成的简单结构
+                # 准备模型文件
+                model_dir = os.path.join(build_context, "model")
+                os.makedirs(model_dir, exist_ok=True)
+
+                await self._prepare_model_files(source_path, source_type, model_dir, progress_callback)
+
+                # 自动检测模型类型
                 if progress_callback:
-                    await progress_callback(30, "Generating Dockerfile...")
+                    await progress_callback(20, "Detecting model type...")
 
-                # 生成Dockerfile
-                dockerfile_content = self._generate_dockerfile(model_type, base_image, config)
-                with open(os.path.join(build_context, "Dockerfile"), "w") as f:
-                    f.write(dockerfile_content)
+                detected_type = self.detect_model_type(model_dir)
+                if detected_type != "custom":
+                    model_type = detected_type
+                    if progress_callback:
+                        await progress_callback(25, f"Detected model type: {model_type}")
 
-                # 生成模型服务代码
-                if progress_callback:
-                    await progress_callback(40, "Generating model service...")
+                adapter = self._select_build_adapter(model_dir, base_image, config)
 
-                service_code = self._generate_model_service(model_type, config)
-                with open(os.path.join(build_context, "model_service.py"), "w") as f:
-                    f.write(service_code)
+                if adapter:
+                    if progress_callback:
+                        await progress_callback(30, adapter["message"])
 
-                # 生成requirements.txt
-                requirements = self._generate_requirements(model_type, config)
-                with open(os.path.join(build_context, "requirements.txt"), "w") as f:
-                    f.write(requirements)
+                    self._copy_project_to_context(adapter["project_dir"], build_context)
+                    if adapter.get("api"):
+                        self._write_text(os.path.join(build_context, "api.py"), adapter["api"])
+                    if adapter.get("dockerfile"):
+                        self._write_text(os.path.join(build_context, "Dockerfile"), adapter["dockerfile"])
+
+                    shutil.rmtree(model_dir, ignore_errors=True)
+                else:
+                    # 使用自动生成的简单结构
+                    if progress_callback:
+                        await progress_callback(30, "Generating Dockerfile...")
+
+                    # 生成Dockerfile
+                    dockerfile_content = self._generate_dockerfile(model_type, base_image, config)
+                    with open(os.path.join(build_context, "Dockerfile"), "w") as f:
+                        f.write(dockerfile_content)
+
+                    # 生成模型服务代码
+                    if progress_callback:
+                        await progress_callback(40, "Generating model service...")
+
+                    service_code = self._generate_model_service(model_type, config)
+                    with open(os.path.join(build_context, "model_service.py"), "w") as f:
+                        f.write(service_code)
+
+                    # 生成requirements.txt
+                    requirements = self._generate_requirements(model_type, config)
+                    with open(os.path.join(build_context, "requirements.txt"), "w") as f:
+                        f.write(requirements)
 
             if progress_callback:
                 await progress_callback(50, "Building Docker image...")
