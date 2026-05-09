@@ -33,6 +33,39 @@ def extract_archive(archive_path: str, extract_to: str):
             tar_ref.extractall(extract_to)
 
 
+def safe_model_dir_name(name: str) -> str:
+    return "".join(char if char.isalnum() or char in ("-", "_") else "_" for char in name).strip("_") or "model"
+
+
+def safe_relative_upload_path(filename: str) -> str:
+    normalized = os.path.normpath((filename or "").replace("\\", "/"))
+    if normalized in ("", ".", ".."):
+        raise HTTPException(status_code=400, detail="上传目录中存在无效文件路径")
+    if os.path.isabs(normalized) or normalized.startswith("../"):
+        raise HTTPException(status_code=400, detail="上传目录中存在非法文件路径")
+
+    safe_parts = [part for part in normalized.split("/") if part not in ("", ".", "..")]
+    if not safe_parts:
+        raise HTTPException(status_code=400, detail="上传目录中存在无效文件路径")
+    return os.path.join(*safe_parts)
+
+
+async def save_uploaded_workspace(files: List[UploadFile], workspace_dir: str):
+    os.makedirs(workspace_dir, exist_ok=True)
+
+    for upload in files:
+        if not upload.filename:
+            continue
+
+        relative_path = safe_relative_upload_path(upload.filename)
+        target_path = os.path.join(workspace_dir, relative_path)
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+
+        async with aiofiles.open(target_path, "wb") as f:
+            content = await upload.read()
+            await f.write(content)
+
+
 def find_model_files(directory: str) -> dict:
     """在目录中查找模型文件"""
     model_files = {
@@ -244,6 +277,67 @@ async def upload_model(
         raise HTTPException(status_code=400, detail=f"解压失败: {str(e)}")
 
 
+@router.post("/finetune", response_model=ModelResponse)
+async def create_finetune_model(
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    model_type: str = Form(...),
+    workdir: str = Form(...),
+    dockerfile_content: str = Form(...),
+    files: List[UploadFile] = File(default=[]),
+    db: AsyncSession = Depends(get_db)
+):
+    """创建微调工作流模型，直接使用用户填写的 Dockerfile。"""
+    if not dockerfile_content.strip():
+        raise HTTPException(status_code=400, detail="Dockerfile 不能为空")
+    if not workdir.strip():
+        raise HTTPException(status_code=400, detail="工作目录不能为空")
+
+    model_dir = os.path.join(settings.MODEL_STORAGE_PATH, safe_model_dir_name(name))
+    workspace_dir = os.path.join(model_dir, "workspace")
+    os.makedirs(model_dir, exist_ok=True)
+
+    try:
+        uploaded_files = [file for file in files if file.filename]
+        if uploaded_files:
+            await save_uploaded_workspace(uploaded_files, workspace_dir)
+
+        source_path = workspace_dir if uploaded_files else model_dir
+        model_files = find_model_files(workspace_dir) if uploaded_files else {}
+
+        db_model = AIModel(
+            name=name,
+            description=description,
+            model_type=model_type,
+            source_type="file",
+            source_path=source_path,
+            config={
+                "workflow_type": "finetune",
+                "model_root_dir": model_dir,
+                "uploaded_workspace": workspace_dir if uploaded_files else None,
+                "runtime_spec": {
+                    "workdir": workdir,
+                    "dockerfile_content": dockerfile_content
+                },
+                "model_files": model_files,
+                "auto_detected": bool(uploaded_files)
+            },
+            status=ModelStatus.UPLOADED
+        )
+
+        db.add(db_model)
+        await db.commit()
+        await db.refresh(db_model)
+
+        return db_model
+    except HTTPException:
+        shutil.rmtree(model_dir, ignore_errors=True)
+        raise
+    except Exception as e:
+        shutil.rmtree(model_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=f"创建微调模型失败: {str(e)}")
+
+
 @router.post("/from-url", response_model=ModelResponse)
 async def create_model_from_url(
     name: str = Form(...),
@@ -427,8 +521,14 @@ async def delete_model(model_id: int, db: AsyncSession = Depends(get_db)):
     if not model:
         raise HTTPException(status_code=404, detail="Model not found")
     
-    # 删除关联的文件
-    if model.source_path and os.path.exists(model.source_path):
+    model_root_dir = None
+    if model.config and isinstance(model.config, dict):
+        model_root_dir = model.config.get("model_root_dir")
+
+    # 优先删除模型根目录，避免微调工作流只删掉 workspace 残留外层目录
+    if model_root_dir and os.path.exists(model_root_dir):
+        shutil.rmtree(model_root_dir, ignore_errors=True)
+    elif model.source_path and os.path.exists(model.source_path):
         if os.path.isdir(model.source_path):
             shutil.rmtree(model.source_path, ignore_errors=True)
         else:

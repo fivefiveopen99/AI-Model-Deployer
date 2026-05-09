@@ -53,6 +53,16 @@ export const useModelsStore = defineStore('models', () => {
     }
   }
 
+  const createFinetuneModel = async (formData, onProgress) => {
+    try {
+      const response = await modelsApi.createFinetune(formData, onProgress)
+      return response.data
+    } catch (error) {
+      console.error('Failed to create finetune model:', error)
+      throw error
+    }
+  }
+
   const uploadModel = async (formData, onProgress) => {
     try {
       const response = await modelsApi.upload(formData, onProgress)
@@ -152,6 +162,7 @@ export const useModelsStore = defineStore('models', () => {
     fetchModels,
     fetchModelDetail,
     createModel,
+    createFinetuneModel,
     uploadModel,
     createModelFromUrl,
     updateModel,
