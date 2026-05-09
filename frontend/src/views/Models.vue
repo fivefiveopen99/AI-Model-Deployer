@@ -125,7 +125,7 @@
     <el-dialog
       v-model="buildStore.progressDialogVisible"
       title="构建进度"
-      width="500px"
+      width="760px"
       :close-on-click-modal="false"
       :close-on-press-escape="false"
       :show-close="!buildStore.building"
@@ -144,6 +144,13 @@
         </div>
         <div v-if="buildStore.buildError" class="progress-error">
           <el-alert :title="buildStore.buildError" type="error" show-icon />
+        </div>
+        <div class="build-log-section">
+          <div class="build-log-header">
+            <span>构建日志</span>
+            <el-button text size="small" @click="clearBuildLogs">清空</el-button>
+          </div>
+          <pre ref="buildLogRef" class="build-log-content">{{ buildStore.buildLogs.join('\n') || '等待构建日志...' }}</pre>
         </div>
       </div>
       <template #footer>
@@ -260,7 +267,7 @@
     <el-dialog v-model="buildDialogVisible" title="构建Docker镜像" width="600px">
       <el-alert
         title="构建说明"
-        description="系统将自动检测模型类型并安装所需依赖。构建完成后，镜像将导出为 tar 文件。您需要手动将 tar 文件分发到所有 K8s 节点并导入：docker load -i xxx.tar"
+        description="系统将自动检测模型类型并安装所需依赖。构建完成后，镜像将推送到内置 Registry：10.10.25.69:5000/ai-models，并由 Kubernetes 节点按需拉取。"
         type="info"
         show-icon
         :closable="false"
@@ -296,7 +303,7 @@ import { formatDate, getModelStatusText, getModelStatusType } from '@/utils/form
 const router = useRouter()
 const modelsStore = useModelsStore()
 const buildStore = useBuildStore()
-const { isConnected, progress, progressMessage, error, connect, subscribe, unsubscribe, disconnect } = useWebSocket()
+const { error, lastMessage, subscribe } = useWebSocket()
 
 const currentPage = ref(1)
 const pageSize = ref(10)
@@ -308,6 +315,7 @@ const currentModel = ref(null)
 const activeTab = ref('github')
 const uploadRef = ref(null)
 const selectedFile = ref(null)
+const buildLogRef = ref(null)
 
 // 上传进度条相关
 const uploadProgress = ref(0)
@@ -562,6 +570,10 @@ const closeProgressDialog = () => {
   buildStore.closeProgress()
 }
 
+const clearBuildLogs = () => {
+  buildStore.setLogs([])
+}
+
 // 停止构建
 const stopBuild = async () => {
   try {
@@ -596,7 +608,7 @@ const submitBuild = async () => {
     const result = await modelsStore.buildModel(currentModel.value.id, buildForm)
 
     if (result.task_id) {
-      buildStore.currentTaskId = result.task_id
+      buildStore.setTask(result.task_id, currentModel.value.id)
       subscribe(result.task_id)
     }
   } catch (error) {
@@ -660,7 +672,7 @@ const viewDetail = (row) => {
 }
 
 const refreshModels = () => {
-  modelsStore.fetchModels({
+  return modelsStore.fetchModels({
     skip: (currentPage.value - 1) * pageSize.value,
     limit: pageSize.value
   })
@@ -676,11 +688,59 @@ const handleCurrentChange = (val) => {
   refreshModels()
 }
 
-// 监听 WebSocket 进度变化
-const unwatchProgress = watch(() => progress.value, (newProgress) => {
-  buildStore.updateProgress(newProgress, progressMessage.value)
+const restoreBuildProgress = async () => {
+  const persisted = buildStore.restorePersistedState()
+  await refreshModels()
 
-  if (newProgress === 100) {
+  const activeModels = await modelsStore.fetchActiveBuildModels()
+  const activeModel = activeModels[0]
+  if (activeModel) {
+    const taskId = `build-${activeModel.id}`
+    if (!persisted || !buildStore.currentTaskId) {
+      buildStore.resumeBuild({
+        taskId,
+        modelId: activeModel.id,
+        progress: buildStore.buildProgress,
+        message: activeModel.status_message || '构建任务恢复中...',
+        minimized: true
+      })
+    }
+    subscribe(buildStore.currentTaskId || taskId)
+    return
+  }
+
+  if (buildStore.building) {
+    buildStore.building = false
+    buildStore.isProgressMinimized = false
+    buildStore.progressDialogVisible = true
+    buildStore.progressMessage = buildStore.progressMessage || '构建任务已结束'
+  }
+}
+
+// 监听 WebSocket 消息，包含进度、日志和刷新后的日志回放
+const unwatchMessage = watch(() => lastMessage.value, (message) => {
+  if (!message) return
+
+  if (message.type === 'log_history') {
+    buildStore.setLogs(message.logs || [])
+    return
+  }
+
+  if (message.type !== 'progress') return
+
+  buildStore.updateProgress(message.progress, message.data?.log ? null : message.message)
+  if (message.data?.log) {
+    buildStore.addLog(message.data.log)
+  }
+
+  if (message.data?.error) {
+    buildStore.setError(message.message)
+    ElMessage.error('构建失败: ' + message.message)
+    refreshModels()
+    return
+  }
+
+  if (message.progress === 100) {
     buildStore.completeBuild()
     ElMessage.success('构建成功！')
     refreshModels()
@@ -695,12 +755,20 @@ const unwatchError = watch(() => error.value, (newError) => {
   }
 })
 
+watch(() => buildStore.buildLogs.length, () => {
+  setTimeout(() => {
+    if (buildLogRef.value) {
+      buildLogRef.value.scrollTop = buildLogRef.value.scrollHeight
+    }
+  }, 0)
+})
+
 onMounted(() => {
-  refreshModels()
+  restoreBuildProgress()
 })
 
 onUnmounted(() => {
-  unwatchProgress()
+  unwatchMessage()
   unwatchError()
 })
 </script>
@@ -754,6 +822,40 @@ onUnmounted(() => {
 
 .progress-error {
   margin-top: 20px;
+}
+
+.build-log-section {
+  margin-top: 20px;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #1f2329;
+}
+
+.build-log-header {
+  height: 36px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f5f7fa;
+  border-bottom: 1px solid #dcdfe6;
+  color: #303133;
+  font-size: 13px;
+}
+
+.build-log-content {
+  height: 280px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  color: #d7dde8;
+  background: #1f2329;
+  font-family: Consolas, Monaco, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .dialog-footer {

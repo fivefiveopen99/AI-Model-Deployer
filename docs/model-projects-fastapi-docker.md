@@ -33,9 +33,9 @@ Scope note: the current workspace does not contain the original uploaded model p
    - generated `Dockerfile` is written into the build context
    - the temporary `model/` copy is removed
 8. Docker builds the image with tag `ai-model:{build_id}`.
-9. The image is exported to a local tar file in `data/images`.
-10. If Kubernetes is connected, the image tar is imported to worker nodes over SSH/SCP.
-11. The model database row is updated with image name, tag, and status.
+9. The image is tagged as `10.10.25.69:5000/ai-models/ai-model:{build_id}`.
+10. The backend pushes the image to the local Docker Registry service.
+11. The model database row is updated with the registry image name, tag, and status.
 
 ## Adapter 1: RCAN Super Resolution
 
@@ -314,8 +314,8 @@ The platform and frontend expect:
 ## Important Caveats
 
 - The current workspace has `data/models` empty, so no uploaded RCAN or Real-ESRGAN source project is available for direct inspection.
-- Existing exported image tar files are under `data/images`, but the source projects used to create them are not present in `data/models`.
-- Docker, Kubernetes, SSH, and network availability should be checked before assuming a build or deployment can run.
+- Existing registry images may not have matching source projects present under `data/models`.
+- Docker, Kubernetes, registry, and network availability should be checked before assuming a build or deployment can run.
 - Generated build contexts are removed after the Docker image build finishes, so inspect or preserve them during debugging if needed.
 - Large weights should be real binary files, not Git LFS pointer files.
 

@@ -133,6 +133,15 @@ export const useModelsStore = defineStore('models', () => {
     }
   }
 
+  const fetchActiveBuildModels = async () => {
+    const activeModels = []
+    for (const status of ['building', 'pushing']) {
+      const response = await modelsApi.getList({ status, limit: 100 })
+      activeModels.push(...response.data.items)
+    }
+    return activeModels
+  }
+
   return {
     models,
     currentModel,
@@ -150,6 +159,7 @@ export const useModelsStore = defineStore('models', () => {
     buildModel,
     stopBuild,
     resetStatus,
-    getModelStatus
+    getModelStatus,
+    fetchActiveBuildModels
   }
 })

@@ -15,7 +15,6 @@ from app.models.schemas import (
     BuildRequest, BuildResponse, TaskStatus
 )
 from app.services.docker_service import docker_service
-from app.services.k8s_service import k8s_service
 from app.core.config import settings
 
 router = APIRouter(prefix="/models", tags=["models"])
@@ -470,16 +469,13 @@ async def delete_model(model_id: int, db: AsyncSession = Depends(get_db)):
     # 删除Docker镜像
     if model.docker_image and model.docker_image_tag:
         docker_service.remove_image(f"{model.docker_image}:{model.docker_image_tag}")
-    
-    # 删除镜像 tar 文件
+
     if model.config and isinstance(model.config, dict):
-        image_tar_path = model.config.get("image_tar_path")
-        if image_tar_path and os.path.exists(image_tar_path):
-            try:
-                os.remove(image_tar_path)
-                print(f"Deleted image tar file: {image_tar_path}")
-            except Exception as e:
-                print(f"Failed to delete image tar file {image_tar_path}: {e}")
+        push_result = model.config.get("push_result") or {}
+        source_image = push_result.get("source_image")
+        registry_image = push_result.get("registry_image")
+        if source_image and source_image != registry_image:
+            docker_service.remove_image(source_image)
     
     await db.delete(model)
     await db.commit()
@@ -559,8 +555,10 @@ async def run_build_task(
             import asyncio
             db_lock = asyncio.Lock()
             
-            async def progress_callback(progress: int, message: str):
-                await manager.send_progress(task_id, progress, message)
+            async def progress_callback(progress: int, message: str, data: Dict[str, Any] = None, persist_status: bool = True):
+                await manager.send_progress(task_id, progress, message, data)
+                if not persist_status:
+                    return
                 # 更新数据库状态（加锁防止并发冲突）
                 async with db_lock:
                     model.status_message = message
@@ -580,90 +578,43 @@ async def run_build_task(
                 progress_callback=progress_callback
             )
             
-            await progress_callback(85, "Build completed, publishing image...")
+            await progress_callback(85, "Build completed, publishing image to registry...")
             
-            # 更新模型信息
             image_tag = build_result["image_tag"]
-            model.docker_image = image_tag.split(":")[0]
-            model.docker_image_tag = image_tag.split(":")[1]
             model.status = ModelStatus.BUILT
             model.status_message = f"Image size: {build_result['size']} bytes"
             
             await db.commit()
             
             model.status = ModelStatus.PUSHING
-            model.status_message = "Exporting image to tar file..."
+            model.status_message = "Pushing image to Docker registry..."
             await db.commit()
             
             try:
-                tar_path = await docker_service.export_image_to_tar(
+                push_result = await docker_service.push_image_to_registry(
                     image_tag,
-                    settings.LOCAL_IMAGE_PATH
+                    progress_callback=progress_callback
                 )
+                registry_image = push_result["registry_image"]
+                registry_repo, registry_tag = registry_image.rsplit(":", 1)
 
-                await progress_callback(90, "Image exported, distributing to K8s nodes...")
+                model.docker_image = registry_repo
+                model.docker_image_tag = registry_tag
+                model.status = ModelStatus.READY
+                model.status_message = f"Image pushed to registry: {registry_image}"
+                model.config = {
+                    **(model.config or {}),
+                    "distribution_mode": "registry",
+                    "registry_image": registry_image,
+                    "push_result": push_result
+                }
 
-                # 自动分发到 K8s 工作节点
-                k8s_connected = await k8s_service.check_connection_async()
-                if k8s_connected:
-                    model.status_message = "Distributing image to K8s worker nodes..."
-                    await db.commit()
-
-                    try:
-                        import_result = await k8s_service.import_image_to_nodes(
-                            tar_path,
-                            image_tag,
-                            ssh_user=os.getenv("K8S_SSH_USER", "root"),
-                            ssh_key_path=os.getenv("K8S_SSH_KEY_PATH"),
-                            progress_callback=progress_callback
-                        )
-
-                        model.status = ModelStatus.READY
-                        if import_result["success"]:
-                            model.status_message = (
-                                f"Image exported and distributed to all {len(import_result['results'])} worker nodes"
-                            )
-                        else:
-                            model.status_message = (
-                                f"Image exported to {tar_path}. Distribution: {import_result['message']}. "
-                                "Manual import may be required."
-                            )
-
-                        model.config = {
-                            **(model.config or {}),
-                            "distribution_mode": "scp",
-                            "image_tar_path": tar_path,
-                            "import_command": f"ctr -n k8s.io images import {os.path.basename(tar_path)}",
-                            "distribution_result": import_result
-                        }
-
-                    except Exception as e:
-                        model.status = ModelStatus.READY
-                        model.status_message = (
-                            f"Image exported to {tar_path}. Auto-distribution failed: {str(e)}. "
-                            "Please distribute manually."
-                        )
-                        model.config = {
-                            **(model.config or {}),
-                            "distribution_mode": "scp",
-                            "image_tar_path": tar_path,
-                            "import_command": f"ctr -n k8s.io images import {os.path.basename(tar_path)}"
-                        }
-                else:
-                    model.status = ModelStatus.READY
-                    model.status_message = f"Image exported to: {tar_path}. K8s not connected, please distribute manually"
-                    model.config = {
-                        **(model.config or {}),
-                        "distribution_mode": "scp",
-                        "image_tar_path": tar_path,
-                        "import_command": f"ctr -n k8s.io images import {os.path.basename(tar_path)}"
-                    }
-
-                await progress_callback(100, "Build and distribution completed!")
+                await progress_callback(100, "Build and registry push completed!")
 
             except Exception as e:
                 model.status = ModelStatus.FAILED
-                model.status_message = f"Image publish failed: {str(e)}"
+                model.status_message = f"Image registry publish failed: {str(e)}"
+                await manager.send_progress(task_id, 0, model.status_message, {"error": True})
             
             await db.commit()
             

@@ -1,6 +1,8 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 
+const BUILD_STATE_KEY = 'ai-model-deployer-build-state'
+
 export const useBuildStore = defineStore('build', () => {
   const building = ref(false)
   const buildProgress = ref(0)
@@ -10,9 +12,51 @@ export const useBuildStore = defineStore('build', () => {
   const progressMessage = ref('')
   const isProgressMinimized = ref(false)
   const progressDialogVisible = ref(false)
+  const buildLogs = ref([])
 
   const isBuilding = computed(() => building.value)
   const isMinimized = computed(() => isProgressMinimized.value)
+
+  const persistState = () => {
+    const state = {
+      building: building.value,
+      buildProgress: buildProgress.value,
+      buildError: buildError.value,
+      currentTaskId: currentTaskId.value,
+      currentModelId: currentModelId.value,
+      progressMessage: progressMessage.value,
+      isProgressMinimized: isProgressMinimized.value,
+      progressDialogVisible: progressDialogVisible.value,
+      buildLogs: buildLogs.value.slice(-1000)
+    }
+    localStorage.setItem(BUILD_STATE_KEY, JSON.stringify(state))
+  }
+
+  const restorePersistedState = () => {
+    const raw = localStorage.getItem(BUILD_STATE_KEY)
+    if (!raw) return null
+
+    try {
+      const state = JSON.parse(raw)
+      building.value = Boolean(state.building)
+      buildProgress.value = Number(state.buildProgress || 0)
+      buildError.value = state.buildError || ''
+      currentTaskId.value = state.currentTaskId || ''
+      currentModelId.value = state.currentModelId || null
+      progressMessage.value = state.progressMessage || ''
+      isProgressMinimized.value = Boolean(state.isProgressMinimized)
+      progressDialogVisible.value = Boolean(state.progressDialogVisible && state.building)
+      buildLogs.value = Array.isArray(state.buildLogs) ? state.buildLogs.slice(-1000) : []
+      return state
+    } catch (error) {
+      localStorage.removeItem(BUILD_STATE_KEY)
+      return null
+    }
+  }
+
+  const clearPersistedState = () => {
+    localStorage.removeItem(BUILD_STATE_KEY)
+  }
 
   const startBuild = (taskId, modelId) => {
     building.value = true
@@ -23,6 +67,20 @@ export const useBuildStore = defineStore('build', () => {
     progressMessage.value = '构建开始...'
     isProgressMinimized.value = false
     progressDialogVisible.value = true
+    buildLogs.value = ['构建开始...']
+    persistState()
+  }
+
+  const resumeBuild = ({ taskId, modelId, progress = 0, message = '构建任务恢复中...', minimized = true }) => {
+    building.value = true
+    buildProgress.value = progress
+    buildError.value = ''
+    currentTaskId.value = taskId
+    currentModelId.value = modelId
+    progressMessage.value = message
+    isProgressMinimized.value = minimized
+    progressDialogVisible.value = !minimized
+    persistState()
   }
 
   const updateProgress = (progress, message) => {
@@ -30,34 +88,62 @@ export const useBuildStore = defineStore('build', () => {
     if (message) {
       progressMessage.value = message
     }
+    persistState()
+  }
+
+  const setTask = (taskId, modelId = currentModelId.value) => {
+    currentTaskId.value = taskId
+    currentModelId.value = modelId
+    persistState()
+  }
+
+  const addLog = (line) => {
+    if (!line) return
+    buildLogs.value.push(line)
+    if (buildLogs.value.length > 1000) {
+      buildLogs.value.splice(0, buildLogs.value.length - 1000)
+    }
+    persistState()
+  }
+
+  const setLogs = (logs) => {
+    buildLogs.value = Array.isArray(logs) ? logs.slice(-1000) : []
+    persistState()
   }
 
   const setError = (error) => {
     buildError.value = error
     building.value = false
     isProgressMinimized.value = false
+    persistState()
   }
 
   const completeBuild = () => {
     building.value = false
     buildProgress.value = 100
     isProgressMinimized.value = false
+    progressDialogVisible.value = true
+    persistState()
   }
 
   const minimizeProgress = () => {
     isProgressMinimized.value = true
     progressDialogVisible.value = false
+    persistState()
   }
 
   const restoreProgress = () => {
     isProgressMinimized.value = false
     progressDialogVisible.value = true
+    persistState()
   }
 
   const closeProgress = () => {
     progressDialogVisible.value = false
     if (!building.value) {
       resetBuild()
+    } else {
+      persistState()
     }
   }
 
@@ -70,12 +156,16 @@ export const useBuildStore = defineStore('build', () => {
     progressMessage.value = ''
     isProgressMinimized.value = false
     progressDialogVisible.value = false
+    buildLogs.value = []
+    clearPersistedState()
   }
 
   const stopBuild = () => {
     building.value = false
     buildError.value = '构建已停止'
     isProgressMinimized.value = false
+    progressDialogVisible.value = true
+    persistState()
   }
 
   return {
@@ -87,10 +177,17 @@ export const useBuildStore = defineStore('build', () => {
     progressMessage,
     isProgressMinimized,
     progressDialogVisible,
+    buildLogs,
     isBuilding,
     isMinimized,
+    restorePersistedState,
+    clearPersistedState,
     startBuild,
+    resumeBuild,
     updateProgress,
+    setTask,
+    addLog,
+    setLogs,
     setError,
     completeBuild,
     minimizeProgress,

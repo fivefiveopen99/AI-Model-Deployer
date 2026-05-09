@@ -14,6 +14,8 @@ class ConnectionManager:
         self.task_connections: Dict[str, Set[str]] = {}
         # 存储任务最后一次进度，客户端晚订阅时也能立刻恢复当前状态
         self.latest_progress: Dict[str, dict] = {}
+        # 存储任务日志，客户端刷新后重新订阅时回放
+        self.task_logs: Dict[str, list] = {}
     
     async def connect(self, websocket: WebSocket, client_id: str):
         """接受新的 WebSocket 连接"""
@@ -38,6 +40,14 @@ class ConnectionManager:
         latest = self.latest_progress.get(task_id)
         if latest:
             await self.send_message(client_id, latest)
+
+        logs = self.task_logs.get(task_id)
+        if logs:
+            await self.send_message(client_id, {
+                "type": "log_history",
+                "task_id": task_id,
+                "logs": logs
+            })
     
     def unsubscribe_from_task(self, client_id: str, task_id: str):
         """取消订阅任务进度"""
@@ -55,6 +65,12 @@ class ConnectionManager:
         }
 
         self.latest_progress[task_id] = message_data
+
+        if data and data.get("log"):
+            logs = self.task_logs.setdefault(task_id, [])
+            logs.append(data["log"])
+            if len(logs) > 1000:
+                del logs[:-1000]
         
         if task_id not in self.task_connections:
             return
