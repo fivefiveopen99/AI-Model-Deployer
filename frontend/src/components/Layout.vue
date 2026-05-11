@@ -94,12 +94,12 @@ onUnmounted(() => {
   width: 248px !important;
   border-radius: 20px;
   background:
-    linear-gradient(180deg, rgba(15, 23, 42, 0.78) 0%, rgba(30, 41, 59, 0.62) 100%);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.24);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+    linear-gradient(180deg, rgba(34, 45, 64, 0.9) 0%, rgba(52, 66, 89, 0.74) 100%);
+  color: #f8fafc;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 22px 52px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
   overflow: hidden;
 }
 
@@ -119,9 +119,9 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.92), rgba(14, 165, 233, 0.68));
-  box-shadow: 0 18px 32px rgba(37, 99, 235, 0.28);
-  color: #eff6ff;
+  background: linear-gradient(180deg, #0077ed 0%, #0071e3 100%);
+  box-shadow: 0 12px 24px rgba(0, 113, 227, 0.18);
+  color: #fff;
 }
 
 .logo-copy {
@@ -139,7 +139,7 @@ onUnmounted(() => {
 
 .logo-copy span {
   font-size: 12px;
-  color: rgba(226, 232, 240, 0.72);
+  color: rgba(226, 232, 240, 0.74);
 }
 
 .sidebar-menu {
@@ -157,24 +157,25 @@ onUnmounted(() => {
   height: 48px;
   margin-bottom: 8px;
   border-radius: 12px;
-  color: rgba(226, 232, 240, 0.82);
+  color: rgba(226, 232, 240, 0.84);
   transition:
     transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
     background-color 0.2s ease,
     color 0.2s ease,
     box-shadow 0.2s ease;
+  font-weight: 500;
 }
 
 .sidebar-menu :deep(.el-menu-item:hover) {
-  transform: translateX(4px);
+  transform: translateX(2px);
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
 }
 
 .sidebar-menu :deep(.el-menu-item.is-active) {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.26), rgba(96, 165, 250, 0.14));
-  color: #f8fbff;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 14px 26px rgba(37, 99, 235, 0.18);
+  background: linear-gradient(180deg, rgba(90, 152, 255, 0.2), rgba(90, 152, 255, 0.12));
+  color: #fff;
+  box-shadow: inset 0 0 0 1px rgba(153, 196, 255, 0.12);
 }
 
 .sidebar-menu :deep(.el-menu-item .el-icon) {
@@ -185,11 +186,11 @@ onUnmounted(() => {
   margin: 18px 18px 0 20px;
   height: 76px;
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.46);
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  box-shadow: 0 18px 44px rgba(86, 108, 140, 0.14);
-  backdrop-filter: blur(22px);
-  -webkit-backdrop-filter: blur(22px);
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(109, 138, 176, 0.1);
+  box-shadow: 0 14px 34px rgba(52, 72, 101, 0.07);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -208,8 +209,8 @@ onUnmounted(() => {
   gap: 8px;
   padding: 0 14px;
   min-height: 38px;
-  border: none;
-  box-shadow: 0 12px 24px rgba(59, 130, 246, 0.16);
+  border: 1px solid rgba(17, 17, 17, 0.04);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
   border-radius: 999px;
 }
 

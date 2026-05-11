@@ -16,21 +16,21 @@
 <style>
 :root {
   color-scheme: light;
-  --app-bg: #f4f7fb;
-  --app-bg-deep: #dbe6f3;
-  --app-surface: rgba(255, 255, 255, 0.62);
-  --app-surface-strong: rgba(255, 255, 255, 0.82);
-  --app-surface-soft: rgba(255, 255, 255, 0.42);
-  --app-border: rgba(255, 255, 255, 0.7);
-  --app-border-muted: rgba(125, 151, 184, 0.22);
-  --app-text: #1f2a37;
-  --app-text-secondary: #5d6b7d;
-  --app-shadow: 0 20px 60px rgba(67, 97, 138, 0.14);
-  --app-shadow-soft: 0 10px 30px rgba(86, 108, 140, 0.12);
-  --app-primary: #2563eb;
-  --app-primary-soft: rgba(37, 99, 235, 0.14);
-  --app-success-soft: rgba(34, 197, 94, 0.15);
-  --app-warning-soft: rgba(245, 158, 11, 0.16);
+  --app-bg: #f3f6fb;
+  --app-bg-deep: #e6edf7;
+  --app-surface: rgba(255, 255, 255, 0.8);
+  --app-surface-strong: rgba(255, 255, 255, 0.94);
+  --app-surface-soft: rgba(255, 255, 255, 0.72);
+  --app-border: rgba(109, 138, 176, 0.12);
+  --app-border-muted: rgba(109, 138, 176, 0.16);
+  --app-text: #1d1d1f;
+  --app-text-secondary: #667085;
+  --app-shadow: 0 20px 50px rgba(52, 72, 101, 0.08);
+  --app-shadow-soft: 0 10px 26px rgba(52, 72, 101, 0.06);
+  --app-primary: #0071e3;
+  --app-primary-soft: rgba(0, 113, 227, 0.1);
+  --app-success-soft: rgba(52, 199, 89, 0.12);
+  --app-warning-soft: rgba(255, 159, 10, 0.12);
 }
 
 * {
@@ -50,9 +50,9 @@ body {
   font-family: "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--app-text);
   background:
-    radial-gradient(circle at top left, rgba(125, 211, 252, 0.55), transparent 32%),
-    radial-gradient(circle at 85% 15%, rgba(59, 130, 246, 0.16), transparent 24%),
-    linear-gradient(135deg, #eef4fb 0%, #f8fbff 48%, #edf2f8 100%);
+    radial-gradient(circle at top center, rgba(0, 113, 227, 0.1), transparent 26%),
+    radial-gradient(circle at 15% 14%, rgba(255, 255, 255, 0.9), transparent 20%),
+    linear-gradient(180deg, #f8fbff 0%, #f3f6fb 44%, #eff4fa 100%);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -63,10 +63,10 @@ body::before {
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at 15% 18%, rgba(255, 255, 255, 0.85), transparent 26%),
-    radial-gradient(circle at 78% 82%, rgba(191, 219, 254, 0.56), transparent 24%);
-  filter: blur(24px);
-  opacity: 0.95;
+    radial-gradient(circle at 15% 18%, rgba(255, 255, 255, 0.9), transparent 24%),
+    radial-gradient(circle at 80% 78%, rgba(125, 211, 252, 0.12), transparent 24%);
+  filter: blur(28px);
+  opacity: 0.92;
 }
 
 .app-shell {
@@ -84,8 +84,8 @@ body::before {
 .bg-orb {
   position: absolute;
   border-radius: 999px;
-  filter: blur(70px);
-  opacity: 0.62;
+  filter: blur(84px);
+  opacity: 0.45;
   animation: ambientFloat 10.5s ease-in-out infinite;
 }
 
@@ -94,7 +94,7 @@ body::before {
   left: -80px;
   width: 340px;
   height: 340px;
-  background: rgba(56, 189, 248, 0.28);
+  background: rgba(255, 255, 255, 0.72);
 }
 
 .orb-b {
@@ -102,7 +102,7 @@ body::before {
   right: -110px;
   width: 320px;
   height: 320px;
-  background: rgba(37, 99, 235, 0.18);
+  background: rgba(59, 130, 246, 0.14);
   animation-delay: -6s;
 }
 
@@ -111,7 +111,7 @@ body::before {
   left: 28%;
   width: 360px;
   height: 360px;
-  background: rgba(34, 197, 94, 0.16);
+  background: rgba(34, 197, 94, 0.1);
   animation-delay: -11s;
 }
 
@@ -119,10 +119,10 @@ body::before {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
-  background-size: 32px 32px;
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.42), transparent 85%);
+    linear-gradient(rgba(116, 139, 173, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(116, 139, 173, 0.03) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.22), transparent 82%);
 }
 
 .dashboard,
@@ -162,8 +162,8 @@ body::before {
   background: var(--app-surface) !important;
   border: 1px solid var(--app-border) !important;
   box-shadow: var(--app-shadow) !important;
-  backdrop-filter: blur(22px) saturate(160%);
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(130%);
+  -webkit-backdrop-filter: blur(18px) saturate(130%);
 }
 
 .el-card {
@@ -176,8 +176,8 @@ body::before {
 }
 
 .el-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 26px 64px rgba(67, 97, 138, 0.18) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 24px 48px rgba(52, 72, 101, 0.1) !important;
 }
 
 .el-card__header,
@@ -197,9 +197,9 @@ body::before {
 }
 
 .el-overlay {
-  background: rgba(130, 146, 166, 0.18) !important;
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  background: rgba(245, 245, 247, 0.62) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
 }
 
 .el-input__wrapper,
@@ -231,11 +231,11 @@ body::before {
 .el-collapse-item__header,
 .el-collapse-item__wrap,
 .el-alert {
-  background: rgba(255, 255, 255, 0.58) !important;
-  border-color: rgba(148, 163, 184, 0.22) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 8px 24px rgba(94, 122, 158, 0.08);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  background: rgba(255, 255, 255, 0.88) !important;
+  border-color: rgba(17, 17, 17, 0.08) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92), 0 6px 18px rgba(15, 23, 42, 0.04);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
 }
 
 .el-button {
@@ -247,8 +247,8 @@ body::before {
 }
 
 .el-button:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.16);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
 }
 
 .el-button:active {
@@ -256,22 +256,28 @@ body::before {
 }
 
 .el-button--primary {
-  background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+  background: linear-gradient(180deg, #0077ed 0%, #0071e3 100%) !important;
   border-color: transparent !important;
 }
 
 .el-button--success {
-  background: linear-gradient(135deg, #16a34a 0%, #15803d 100%) !important;
+  background: linear-gradient(180deg, #34c759 0%, #2fb451 100%) !important;
   border-color: transparent !important;
+}
+
+.el-button--default {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-color: rgba(17, 17, 17, 0.08) !important;
+  color: var(--app-text) !important;
 }
 
 .el-table,
 .el-descriptions__body {
   border-radius: 14px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.4) !important;
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  background: rgba(255, 255, 255, 0.95) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .el-table tr,
@@ -286,6 +292,7 @@ body::before {
 .el-table th.el-table__cell {
   color: var(--app-text);
   font-weight: 600;
+  font-size: 13px;
 }
 
 .el-table .el-table__row {
@@ -295,7 +302,7 @@ body::before {
 }
 
 .el-table .el-table__row:hover > td.el-table__cell {
-  background: rgba(255, 255, 255, 0.48) !important;
+  background: rgba(0, 113, 227, 0.03) !important;
 }
 
 .el-table .el-table__row:hover {
@@ -316,11 +323,11 @@ body::before {
 .el-page-header {
   padding: 14px 18px;
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.52);
-  border: 1px solid rgba(255, 255, 255, 0.76);
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(17, 17, 17, 0.06);
   box-shadow: var(--app-shadow-soft);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .card-header,
@@ -335,11 +342,40 @@ body::before {
 .config-code,
 .logs-content,
 .result-code {
-  background: rgba(240, 245, 252, 0.72) !important;
-  border: 1px solid rgba(148, 163, 184, 0.14);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(251, 251, 253, 0.96) !important;
+  border: 1px solid rgba(17, 17, 17, 0.06);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.el-tag {
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.el-tag--info {
+  background: rgba(120, 120, 128, 0.08) !important;
+  color: #4a4a4f !important;
+  border-color: transparent !important;
+}
+
+.el-tag--success {
+  background: rgba(52, 199, 89, 0.1) !important;
+  color: #248a3d !important;
+  border-color: transparent !important;
+}
+
+.el-tag--warning {
+  background: rgba(255, 159, 10, 0.12) !important;
+  color: #b06800 !important;
+  border-color: transparent !important;
+}
+
+.el-tag--danger {
+  background: rgba(255, 59, 48, 0.1) !important;
+  color: #c9342c !important;
+  border-color: transparent !important;
 }
 
 @keyframes ambientFloat {

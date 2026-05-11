@@ -1,25 +1,51 @@
 <template>
   <div class="deployments-page">
-    <el-card>
+    <section class="page-hero">
+      <div class="hero-copy">
+        <span class="hero-eyebrow">部署中心</span>
+        <h1>部署管理</h1>
+      </div>
+      <div class="hero-actions">
+        <el-button type="primary" class="hero-primary" @click="showCreateDialog">
+          <el-icon><Plus /></el-icon>
+          创建部署
+        </el-button>
+        <el-button class="hero-secondary" @click="refreshDeployments">
+          <el-icon><Refresh /></el-icon>
+          刷新列表
+        </el-button>
+      </div>
+    </section>
+
+    <el-card class="deployments-shell">
       <template #header>
-        <div class="card-header">
-          <span>部署管理</span>
-          <div class="header-actions">
-            <el-button type="primary" @click="showCreateDialog">
-              <el-icon><Plus /></el-icon>
-              创建部署
-            </el-button>
-            <el-button @click="refreshDeployments">
-              <el-icon><Refresh /></el-icon>
-              刷新
-            </el-button>
+        <div class="shell-header">
+          <div>
+            <span class="section-eyebrow">部署列表</span>
+            <h2>所有部署</h2>
+            <p>查看状态、扩缩容和在线地址，重点信息优先展示。</p>
           </div>
+          <el-tag type="info" effect="plain" class="count-pill">
+            {{ deploymentsStore.total }} 个部署
+          </el-tag>
         </div>
       </template>
 
-      <el-table :data="deploymentsStore.deployments" v-loading="deploymentsStore.loading" stripe>
+      <el-table
+        :data="deploymentsStore.deployments"
+        v-loading="deploymentsStore.loading"
+        stripe
+        class="deployments-table"
+      >
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="部署名称" />
+        <el-table-column prop="name" label="部署名称" min-width="220">
+          <template #default="{ row }">
+            <div class="deployment-name-cell">
+              <strong>{{ row.name }}</strong>
+              <span>#{{ row.id }} · {{ row.namespace }}</span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column prop="namespace" label="命名空间" width="120">
           <template #default="{ row }">
             <el-tag type="info">{{ row.namespace }}</el-tag>
@@ -32,14 +58,14 @@
         </el-table-column>
         <el-table-column prop="status" label="状态" width="120">
           <template #default="{ row }">
-            <el-tag :type="getDeploymentStatusType(row.status)">
+            <el-tag :type="getDeploymentStatusType(row.status)" effect="plain">
               {{ getDeploymentStatusText(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="endpoint" label="访问地址">
+        <el-table-column prop="endpoint" label="访问地址" min-width="240">
           <template #default="{ row }">
-            <span v-if="row.endpoint" class="endpoint">{{ row.endpoint }}</span>
+            <span v-if="row.endpoint" class="endpoint-chip">{{ row.endpoint }}</span>
             <span v-else class="text-gray">未部署</span>
           </template>
         </el-table-column>
@@ -48,9 +74,9 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="310" fixed="right">
           <template #default="{ row }">
-            <el-button-group>
+            <div class="action-row">
               <el-button size="small" @click="viewDetail(row)">详情</el-button>
               <el-button 
                 size="small" 
@@ -62,7 +88,7 @@
               </el-button>
               <el-button size="small" type="primary" @click="showScaleDialog(row)">扩缩容</el-button>
               <el-button size="small" type="danger" @click="deleteDeployment(row)">删除</el-button>
-            </el-button-group>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -464,33 +490,135 @@ const stopPolling = () => {
 <style scoped>
 .deployments-page {
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
-.card-header {
+.page-hero {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 18px;
+  padding: 2px 2px 0;
+}
+
+.hero-copy {
+  max-width: 520px;
+}
+
+.hero-eyebrow,
+.section-eyebrow {
+  display: inline-block;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #86868b;
+}
+
+.hero-copy h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.14;
+  letter-spacing: -0.04em;
+  color: #1d1d1f;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 12px;
   align-items: center;
 }
 
-.header-actions {
+.hero-primary,
+.hero-secondary {
+  min-width: 112px;
+  min-height: 42px;
+  padding: 0 16px;
+}
+
+.deployments-shell :deep(.el-card__body) {
+  padding-top: 8px;
+}
+
+.shell-header {
   display: flex;
-  gap: 10px;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 18px;
+}
+
+.shell-header h2 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.shell-header p {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #667085;
+}
+
+.count-pill {
+  padding: 0 12px;
+  min-height: 34px;
 }
 
 .pagination {
-  margin-top: 20px;
+  margin-top: 18px;
   display: flex;
   justify-content: flex-end;
 }
 
 .text-gray {
-  color: #909399;
+  color: #8e8e93;
 }
 
-.endpoint {
-  font-family: monospace;
+.deployment-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.deployment-name-cell strong {
+  font-size: 14px;
+  color: #1d1d1f;
+}
+
+.deployment-name-cell span {
   font-size: 12px;
-  color: #409EFF;
+  color: #86868b;
+}
+
+.endpoint-chip {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(0, 113, 227, 0.06);
+  color: #0066cc;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.deployments-table :deep(.el-table__header th) {
+  height: 50px;
+}
+
+.deployments-table :deep(.el-table__row td) {
+  height: 62px;
 }
 
 .env-row {
@@ -524,5 +652,24 @@ const stopPolling = () => {
 
 .progress-error {
   margin-top: 20px;
+}
+
+@media (max-width: 900px) {
+  .page-hero,
+  .shell-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .hero-copy h1 {
+    font-size: 28px;
+  }
+}
+
+@media (max-width: 720px) {
+  .hero-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
 }
 </style>
