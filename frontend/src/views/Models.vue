@@ -1,23 +1,38 @@
 <template>
   <div class="models-page">
-    <el-card>
+    <section class="page-hero">
+      <div class="hero-copy">
+        <span class="hero-eyebrow">模型中心</span>
+        <h1>模型管理</h1>
+        <p>统一管理模型来源、构建进度和镜像状态，保留核心操作，减少视觉噪音。</p>
+      </div>
+      <div class="hero-actions">
+        <el-button type="primary" class="hero-primary" @click="showCreateDialog">
+          <el-icon><Plus /></el-icon>
+          添加模型
+        </el-button>
+        <el-button class="hero-secondary" @click="refreshModels">
+          <el-icon><Refresh /></el-icon>
+          刷新列表
+        </el-button>
+      </div>
+    </section>
+
+    <el-card class="models-shell">
       <template #header>
-        <div class="card-header">
-          <span>模型管理</span>
-          <div class="header-actions">
-            <el-button type="primary" @click="showCreateDialog">
-              <el-icon><Plus /></el-icon>
-              添加模型
-            </el-button>
-            <el-button @click="refreshModels">
-              <el-icon><Refresh /></el-icon>
-              刷新
-            </el-button>
+        <div class="shell-header">
+          <div>
+            <span class="section-eyebrow">模型列表</span>
+            <h2>所有模型</h2>
+            <p>支持手动录入、GitHub 导入与压缩包上传，构建状态统一在列表中跟踪。</p>
           </div>
+          <el-tag type="info" effect="plain" class="count-pill">
+            {{ modelsStore.total }} 个模型
+          </el-tag>
         </div>
       </template>
 
-      <el-table :data="modelsStore.models" v-loading="modelsStore.loading" stripe>
+      <el-table :data="modelsStore.models" v-loading="modelsStore.loading" stripe class="models-table">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="模型名称" />
         <el-table-column prop="model_type" label="类型" width="120">
@@ -708,17 +723,89 @@ onUnmounted(() => {
 <style scoped>
 .models-page {
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
-.card-header {
+.page-hero {
   display: flex;
+  align-items: center;
   justify-content: space-between;
+  gap: 18px;
+  padding: 2px 2px 0;
+}
+
+.hero-copy {
+  max-width: 560px;
+}
+
+.hero-eyebrow,
+.section-eyebrow {
+  display: inline-block;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--app-text-tertiary);
+}
+
+.hero-copy h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.14;
+  letter-spacing: -0.04em;
+  color: var(--app-text);
+}
+
+.hero-copy p {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--app-text-secondary);
+}
+
+.hero-actions {
+  display: flex;
+  gap: 12px;
   align-items: center;
 }
 
-.header-actions {
+.hero-primary,
+.hero-secondary {
+  min-width: 112px;
+  min-height: 42px;
+  padding: 0 16px;
+}
+
+.models-shell :deep(.el-card__body) {
+  padding-top: 8px;
+}
+
+.shell-header {
   display: flex;
-  gap: 10px;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 18px;
+}
+
+.shell-header h2 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.shell-header p {
+  margin-top: 6px;
+  font-size: 13px;
+  color: var(--app-text-secondary);
+}
+
+.count-pill {
+  padding: 0 12px;
+  min-height: 34px;
 }
 
 .pagination {
@@ -728,12 +815,12 @@ onUnmounted(() => {
 }
 
 .text-gray {
-  color: #909399;
+  color: var(--app-text-tertiary);
 }
 
 .form-tip {
   font-size: 12px;
-  color: #909399;
+  color: var(--app-text-tertiary);
   margin-top: 5px;
 }
 
@@ -744,7 +831,7 @@ onUnmounted(() => {
 .progress-message {
   margin-top: 20px;
   text-align: center;
-  color: #606266;
+  color: var(--app-text-secondary);
   font-size: 14px;
   display: flex;
   align-items: center;
@@ -767,19 +854,24 @@ onUnmounted(() => {
   position: fixed;
   right: 20px;
   bottom: 20px;
-  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
-  border-radius: 12px;
-  padding: 12px 20px;
-  box-shadow: 0 4px 20px rgba(64, 158, 255, 0.4);
+  background: linear-gradient(135deg, rgba(52, 91, 126, 0.94) 0%, rgba(38, 67, 96, 0.92) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  padding: 14px 20px;
+  box-shadow: 0 18px 36px rgba(24, 32, 42, 0.22);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
   cursor: pointer;
   z-index: 9999;
-  transition: all 0.3s ease;
+  transition:
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.35s cubic-bezier(0.22, 1, 0.36, 1);
   min-width: 180px;
 }
 
 .minimized-progress:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 25px rgba(64, 158, 255, 0.5);
+  transform: translateY(-4px);
+  box-shadow: 0 22px 42px rgba(24, 32, 42, 0.28);
 }
 
 .minimized-content {
@@ -806,5 +898,32 @@ onUnmounted(() => {
 
 .minimized-bar :deep(.el-progress-bar__inner) {
   background-color: #fff !important;
+}
+
+.models-table :deep(.el-table__header th) {
+  height: 52px;
+}
+
+.models-table :deep(.el-table__row td) {
+  height: 62px;
+}
+
+@media (max-width: 900px) {
+  .page-hero,
+  .shell-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .hero-copy h1 {
+    font-size: 28px;
+  }
+}
+
+@media (max-width: 720px) {
+  .hero-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
 }
 </style>

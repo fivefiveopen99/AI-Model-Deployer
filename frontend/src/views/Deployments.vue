@@ -4,6 +4,7 @@
       <div class="hero-copy">
         <span class="hero-eyebrow">部署中心</span>
         <h1>部署管理</h1>
+        <p>聚焦在线状态、扩缩容与访问地址，用更克制的视觉层级呈现运行信息。</p>
       </div>
       <div class="hero-actions">
         <el-button type="primary" class="hero-primary" @click="showCreateDialog">
@@ -515,7 +516,7 @@ const stopPolling = () => {
   font-weight: 600;
   letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: #86868b;
+  color: var(--app-text-tertiary);
 }
 
 .hero-copy h1 {
@@ -523,7 +524,14 @@ const stopPolling = () => {
   font-size: 30px;
   line-height: 1.14;
   letter-spacing: -0.04em;
-  color: #1d1d1f;
+  color: var(--app-text);
+}
+
+.hero-copy p {
+  margin-top: 8px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--app-text-secondary);
 }
 
 .hero-actions {
@@ -560,7 +568,7 @@ const stopPolling = () => {
 .shell-header p {
   margin-top: 6px;
   font-size: 13px;
-  color: #667085;
+  color: var(--app-text-secondary);
 }
 
 .count-pill {
@@ -575,7 +583,7 @@ const stopPolling = () => {
 }
 
 .text-gray {
-  color: #8e8e93;
+  color: var(--app-text-tertiary);
 }
 
 .deployment-name-cell {
@@ -586,25 +594,26 @@ const stopPolling = () => {
 
 .deployment-name-cell strong {
   font-size: 14px;
-  color: #1d1d1f;
+  color: var(--app-text);
 }
 
 .deployment-name-cell span {
   font-size: 12px;
-  color: #86868b;
+  color: var(--app-text-tertiary);
 }
 
 .endpoint-chip {
   display: inline-flex;
   max-width: 100%;
-  padding: 8px 12px;
+  padding: 8px 14px;
   border-radius: 999px;
-  background: rgba(0, 113, 227, 0.06);
-  color: #0066cc;
+  background: rgba(47, 91, 131, 0.08);
+  color: var(--app-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
   word-break: break-all;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42);
 }
 
 .action-row {
@@ -642,7 +651,7 @@ const stopPolling = () => {
 .progress-message {
   margin-top: 20px;
   text-align: center;
-  color: #606266;
+  color: var(--app-text-secondary);
   font-size: 14px;
   display: flex;
   align-items: center;

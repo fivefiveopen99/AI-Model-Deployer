@@ -87,20 +87,45 @@ onUnmounted(() => {
 .layout-container {
   min-height: 100vh;
   position: relative;
+  isolation: isolate;
+}
+
+.layout-container::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 18%),
+    radial-gradient(circle at 0 0, rgba(255, 255, 255, 0.24), transparent 22%);
+  opacity: 0.8;
 }
 
 .sidebar {
   margin: 18px 0 18px 18px;
   width: 248px !important;
-  border-radius: 20px;
+  border-radius: 28px;
   background:
-    linear-gradient(180deg, rgba(34, 45, 64, 0.9) 0%, rgba(52, 66, 89, 0.74) 100%);
+    linear-gradient(180deg, rgba(28, 37, 48, 0.86) 0%, rgba(43, 55, 70, 0.76) 100%);
   color: #f8fafc;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  box-shadow: 0 22px 52px rgba(15, 23, 42, 0.14);
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 28px 56px rgba(24, 32, 42, 0.16);
+  backdrop-filter: blur(28px) saturate(132%);
+  -webkit-backdrop-filter: blur(28px) saturate(132%);
   overflow: hidden;
+  position: relative;
+}
+
+.sidebar::after {
+  content: "";
+  position: absolute;
+  inset: auto -40px -80px auto;
+  width: 180px;
+  height: 180px;
+  border-radius: 999px;
+  background: rgba(106, 143, 177, 0.18);
+  filter: blur(48px);
+  pointer-events: none;
 }
 
 .logo {
@@ -115,12 +140,12 @@ onUnmounted(() => {
 .logo-mark {
   width: 52px;
   height: 52px;
-  border-radius: 14px;
+  border-radius: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(180deg, #0077ed 0%, #0071e3 100%);
-  box-shadow: 0 12px 24px rgba(0, 113, 227, 0.18);
+  background: linear-gradient(180deg, #4b7296 0%, #2f5b83 100%);
+  box-shadow: 0 16px 30px rgba(47, 91, 131, 0.26);
   color: #fff;
 }
 
@@ -134,7 +159,7 @@ onUnmounted(() => {
   font-size: 17px;
   font-weight: 700;
   color: #f8fafc;
-  letter-spacing: 0.01em;
+  letter-spacing: -0.01em;
 }
 
 .logo-copy span {
@@ -154,28 +179,31 @@ onUnmounted(() => {
 }
 
 .sidebar-menu :deep(.el-menu-item) {
-  height: 48px;
+  height: 50px;
   margin-bottom: 8px;
-  border-radius: 12px;
+  border-radius: 14px;
   color: rgba(226, 232, 240, 0.84);
   transition:
-    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1),
-    background-color 0.2s ease,
-    color 0.2s ease,
-    box-shadow 0.2s ease;
+    transform 0.32s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.32s ease,
+    color 0.32s ease,
+    box-shadow 0.32s ease;
   font-weight: 500;
 }
 
 .sidebar-menu :deep(.el-menu-item:hover) {
-  transform: translateX(2px);
+  transform: translateX(4px);
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
 
 .sidebar-menu :deep(.el-menu-item.is-active) {
-  background: linear-gradient(180deg, rgba(90, 152, 255, 0.2), rgba(90, 152, 255, 0.12));
+  background: linear-gradient(180deg, rgba(89, 127, 161, 0.28), rgba(89, 127, 161, 0.16));
   color: #fff;
-  box-shadow: inset 0 0 0 1px rgba(153, 196, 255, 0.12);
+  box-shadow:
+    inset 0 0 0 1px rgba(191, 212, 232, 0.12),
+    0 14px 24px rgba(24, 32, 42, 0.16);
 }
 
 .sidebar-menu :deep(.el-menu-item .el-icon) {
@@ -185,16 +213,25 @@ onUnmounted(() => {
 .header {
   margin: 18px 18px 0 20px;
   height: 76px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid rgba(109, 138, 176, 0.1);
-  box-shadow: 0 14px 34px rgba(52, 72, 101, 0.07);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.56);
+  border: 1px solid rgba(92, 103, 116, 0.12);
+  box-shadow: 0 18px 36px rgba(37, 45, 57, 0.07);
+  backdrop-filter: blur(28px) saturate(138%);
+  -webkit-backdrop-filter: blur(28px) saturate(138%);
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 0 24px;
+}
+
+.header-left {
+  min-width: 0;
+}
+
+.header-left :deep(.el-breadcrumb__inner),
+.header-left :deep(.el-breadcrumb__separator) {
+  color: var(--app-text-secondary);
 }
 
 .header-right {
@@ -207,11 +244,14 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 0 14px;
-  min-height: 38px;
-  border: 1px solid rgba(17, 17, 17, 0.04);
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.04);
+  padding: 0 16px;
+  min-height: 40px;
+  border: 1px solid rgba(92, 103, 116, 0.08);
+  box-shadow: 0 10px 20px rgba(37, 45, 57, 0.05);
   border-radius: 999px;
+  background: rgba(255, 255, 255, 0.54);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .status-dot {
@@ -219,7 +259,7 @@ onUnmounted(() => {
   height: 8px;
   border-radius: 999px;
   background: currentColor;
-  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.22);
+  box-shadow: 0 0 0 7px rgba(255, 255, 255, 0.3);
 }
 
 .main-content {
@@ -230,21 +270,33 @@ onUnmounted(() => {
 
 .route-view-shell {
   min-height: 100%;
+  animation: routeShellIn 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .route-float-enter-active,
 .route-float-leave-active {
   transition:
-    opacity 0.18s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.18s cubic-bezier(0.22, 1, 0.36, 1),
-    filter 0.18s ease;
+    opacity 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.3s ease;
 }
 
 .route-float-enter-from,
 .route-float-leave-to {
   opacity: 0;
-  transform: translateY(6px) scale(0.997);
-  filter: blur(2px);
+  transform: translateY(14px) scale(0.992);
+  filter: blur(8px);
+}
+
+@keyframes routeShellIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (max-width: 1100px) {

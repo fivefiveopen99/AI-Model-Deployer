@@ -1,5 +1,27 @@
 <template>
   <div class="dashboard">
+    <section class="dashboard-hero">
+      <div class="hero-copy">
+        <span class="hero-eyebrow">Control Center</span>
+        <h1>模型构建、分发与部署总览</h1>
+        <p>在一个面板内查看模型资产、在线服务和 Kubernetes 连通状态，重点信息保持前置。</p>
+      </div>
+      <div class="hero-actions">
+        <el-button type="primary" @click="$router.push('/models')">
+          <el-icon><Plus /></el-icon>
+          添加模型
+        </el-button>
+        <el-button type="success" @click="$router.push('/deployments')">
+          <el-icon><Ship /></el-icon>
+          创建部署
+        </el-button>
+        <el-button @click="refreshStatus">
+          <el-icon><Refresh /></el-icon>
+          刷新状态
+        </el-button>
+      </div>
+    </section>
+
     <el-row :gutter="20">
       <el-col :span="6">
         <el-card class="stat-card">
@@ -154,58 +176,113 @@ onMounted(() => {
   padding: 0;
 }
 
+.dashboard-hero {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 20px;
+  margin-bottom: 18px;
+  padding: 4px 2px 0;
+}
+
+.hero-copy {
+  max-width: 640px;
+}
+
+.hero-eyebrow {
+  display: inline-block;
+  margin-bottom: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--app-text-tertiary);
+}
+
+.hero-copy h1 {
+  margin: 0;
+  font-size: 34px;
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+  color: var(--app-text);
+}
+
+.hero-copy p {
+  margin-top: 10px;
+  max-width: 580px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--app-text-secondary);
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .stat-card {
   display: flex;
   align-items: center;
-  padding: 12px;
-  min-height: 144px;
+  padding: 16px;
+  min-height: 156px;
   position: relative;
   overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.24), transparent 45%);
 }
 
 .stat-card::after {
   content: "";
   position: absolute;
-  inset: auto -30px -55px auto;
-  width: 120px;
-  height: 120px;
+  inset: auto -36px -62px auto;
+  width: 140px;
+  height: 140px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.26);
-  filter: blur(14px);
+  background: rgba(255, 255, 255, 0.34);
+  filter: blur(20px);
+}
+
+.stat-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.18), transparent 58%);
+  pointer-events: none;
 }
 
 .stat-icon {
   width: 80px;
   height: 80px;
-  border-radius: 18px;
+  border-radius: 24px;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-right: 20px;
-  box-shadow: 0 18px 34px rgba(86, 108, 140, 0.16);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
-  animation: floatIcon 5.5s ease-in-out infinite;
+  box-shadow: 0 22px 34px rgba(37, 45, 57, 0.14);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  animation: floatIcon 8s cubic-bezier(0.37, 0, 0.2, 1) infinite;
 }
 
 .stat-icon.blue {
-  background: linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(125, 211, 252, 0.34));
-  color: #2563eb;
+  background: linear-gradient(135deg, rgba(47, 91, 131, 0.16), rgba(188, 207, 223, 0.4));
+  color: #2f5b83;
 }
 
 .stat-icon.green {
-  background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(187, 247, 208, 0.34));
-  color: #15803d;
+  background: linear-gradient(135deg, rgba(47, 143, 111, 0.16), rgba(203, 232, 221, 0.4));
+  color: #287b60;
 }
 
 .stat-icon.orange {
-  background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(253, 230, 138, 0.36));
-  color: #d97706;
+  background: linear-gradient(135deg, rgba(178, 130, 61, 0.18), rgba(239, 222, 193, 0.38));
+  color: #8e6931;
 }
 
 .stat-icon.purple {
-  background: linear-gradient(135deg, rgba(14, 165, 233, 0.16), rgba(191, 219, 254, 0.34));
-  color: #0369a1;
+  background: linear-gradient(135deg, rgba(85, 112, 138, 0.16), rgba(207, 218, 228, 0.38));
+  color: #4f6680;
 }
 
 .stat-info {
@@ -217,14 +294,14 @@ onMounted(() => {
 .stat-value {
   font-size: 34px;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--app-text);
   line-height: 1.1;
   letter-spacing: -0.03em;
 }
 
 .stat-label {
   font-size: 14px;
-  color: #64748b;
+  color: var(--app-text-secondary);
   margin-top: 8px;
 }
 
@@ -249,7 +326,7 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 14px 0;
-  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  border-bottom: 1px solid rgba(92, 103, 116, 0.12);
 }
 
 .status-item:last-child {
@@ -258,7 +335,7 @@ onMounted(() => {
 
 .status-label {
   font-size: 14px;
-  color: #475569;
+  color: #4d5d6e;
 }
 
 .quick-actions {
@@ -284,10 +361,26 @@ onMounted(() => {
 @keyframes floatIcon {
   0%,
   100% {
-    transform: translateY(0);
+    transform: translateY(0) rotate(0deg);
   }
-  50% {
-    transform: translateY(-4px);
+  45% {
+    transform: translateY(-6px) rotate(2deg);
+  }
+  70% {
+    transform: translateY(2px) rotate(-1deg);
+  }
+}
+
+@media (max-width: 980px) {
+  .dashboard-hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 760px) {
+  .hero-copy h1 {
+    font-size: 30px;
   }
 }
 </style>

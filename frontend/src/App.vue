@@ -16,21 +16,31 @@
 <style>
 :root {
   color-scheme: light;
-  --app-bg: #f3f6fb;
-  --app-bg-deep: #e6edf7;
-  --app-surface: rgba(255, 255, 255, 0.8);
-  --app-surface-strong: rgba(255, 255, 255, 0.94);
-  --app-surface-soft: rgba(255, 255, 255, 0.72);
-  --app-border: rgba(109, 138, 176, 0.12);
-  --app-border-muted: rgba(109, 138, 176, 0.16);
-  --app-text: #1d1d1f;
-  --app-text-secondary: #667085;
-  --app-shadow: 0 20px 50px rgba(52, 72, 101, 0.08);
-  --app-shadow-soft: 0 10px 26px rgba(52, 72, 101, 0.06);
-  --app-primary: #0071e3;
-  --app-primary-soft: rgba(0, 113, 227, 0.1);
-  --app-success-soft: rgba(52, 199, 89, 0.12);
-  --app-warning-soft: rgba(255, 159, 10, 0.12);
+  --app-bg: #f4f1eb;
+  --app-bg-deep: #ebe6de;
+  --app-bg-muted: #ddd7ce;
+  --app-surface: rgba(255, 255, 255, 0.62);
+  --app-surface-strong: rgba(255, 255, 255, 0.78);
+  --app-surface-soft: rgba(255, 255, 255, 0.48);
+  --app-surface-contrast: rgba(24, 32, 42, 0.74);
+  --app-border: rgba(92, 103, 116, 0.14);
+  --app-border-muted: rgba(92, 103, 116, 0.08);
+  --app-text: #18202a;
+  --app-text-secondary: #617080;
+  --app-text-tertiary: #8b97a5;
+  --app-shadow: 0 28px 80px rgba(37, 45, 57, 0.09);
+  --app-shadow-soft: 0 16px 38px rgba(37, 45, 57, 0.07);
+  --app-shadow-strong: 0 28px 72px rgba(37, 45, 57, 0.16);
+  --app-primary: #2f5b83;
+  --app-primary-strong: #224463;
+  --app-primary-soft: rgba(47, 91, 131, 0.12);
+  --app-primary-tint: rgba(95, 133, 170, 0.22);
+  --app-success-soft: rgba(46, 133, 101, 0.12);
+  --app-warning-soft: rgba(178, 130, 61, 0.12);
+  --app-danger-soft: rgba(183, 95, 82, 0.1);
+  --app-radius-xl: 26px;
+  --app-radius-lg: 20px;
+  --app-radius-md: 14px;
 }
 
 * {
@@ -50,9 +60,10 @@ body {
   font-family: "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
   color: var(--app-text);
   background:
-    radial-gradient(circle at top center, rgba(0, 113, 227, 0.1), transparent 26%),
-    radial-gradient(circle at 15% 14%, rgba(255, 255, 255, 0.9), transparent 20%),
-    linear-gradient(180deg, #f8fbff 0%, #f3f6fb 44%, #eff4fa 100%);
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.8), transparent 22%),
+    radial-gradient(circle at 85% 12%, rgba(93, 129, 164, 0.16), transparent 26%),
+    radial-gradient(circle at 70% 78%, rgba(210, 223, 235, 0.5), transparent 26%),
+    linear-gradient(180deg, #fbf8f3 0%, #f4f1eb 42%, #ece8e0 100%);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -63,10 +74,25 @@ body::before {
   inset: 0;
   pointer-events: none;
   background:
-    radial-gradient(circle at 15% 18%, rgba(255, 255, 255, 0.9), transparent 24%),
-    radial-gradient(circle at 80% 78%, rgba(125, 211, 252, 0.12), transparent 24%);
-  filter: blur(28px);
-  opacity: 0.92;
+    radial-gradient(circle at 10% 18%, rgba(255, 255, 255, 0.86), transparent 26%),
+    radial-gradient(circle at 84% 24%, rgba(91, 122, 153, 0.14), transparent 20%),
+    radial-gradient(circle at 72% 84%, rgba(191, 204, 217, 0.42), transparent 26%);
+  filter: blur(48px);
+  opacity: 0.9;
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.04)),
+    linear-gradient(90deg, rgba(24, 32, 42, 0.012) 1px, transparent 1px),
+    linear-gradient(rgba(24, 32, 42, 0.012) 1px, transparent 1px);
+  background-size: auto, 72px 72px, 72px 72px;
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.45), transparent 86%);
+  opacity: 0.46;
 }
 
 .app-shell {
@@ -84,45 +110,45 @@ body::before {
 .bg-orb {
   position: absolute;
   border-radius: 999px;
-  filter: blur(84px);
-  opacity: 0.45;
-  animation: ambientFloat 10.5s ease-in-out infinite;
+  filter: blur(110px);
+  opacity: 0.48;
+  animation: ambientFloat 18s cubic-bezier(0.37, 0, 0.2, 1) infinite;
 }
 
 .orb-a {
-  top: -120px;
-  left: -80px;
-  width: 340px;
-  height: 340px;
-  background: rgba(255, 255, 255, 0.72);
+  top: -130px;
+  left: -120px;
+  width: 420px;
+  height: 420px;
+  background: rgba(255, 255, 255, 0.84);
 }
 
 .orb-b {
-  top: 18%;
-  right: -110px;
-  width: 320px;
-  height: 320px;
-  background: rgba(59, 130, 246, 0.14);
-  animation-delay: -6s;
+  top: 12%;
+  right: -140px;
+  width: 420px;
+  height: 420px;
+  background: rgba(72, 104, 138, 0.18);
+  animation-delay: -5s;
 }
 
 .orb-c {
-  bottom: -140px;
-  left: 28%;
-  width: 360px;
-  height: 360px;
-  background: rgba(34, 197, 94, 0.1);
-  animation-delay: -11s;
+  bottom: -180px;
+  left: 18%;
+  width: 520px;
+  height: 520px;
+  background: rgba(193, 205, 217, 0.34);
+  animation-delay: -9s;
 }
 
 .bg-grid {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(116, 139, 173, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(116, 139, 173, 0.03) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.22), transparent 82%);
+    linear-gradient(rgba(94, 108, 122, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(94, 108, 122, 0.03) 1px, transparent 1px);
+  background-size: 54px 54px;
+  mask-image: radial-gradient(circle at top, rgba(0, 0, 0, 0.26), transparent 76%);
 }
 
 .dashboard,
@@ -135,23 +161,25 @@ body::before {
   z-index: 1;
 }
 
-.dashboard > .el-row,
-.models-page > .el-card,
-.deployments-page > .el-card,
+.dashboard > *,
+.models-page > *,
+.deployments-page > *,
 .model-detail-page > *,
 .deployment-detail-page > *,
 .model-playground-page > * {
-  animation: sectionRise 0.34s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: sectionRise 0.56s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.dashboard > .el-row:nth-child(2),
+.dashboard > *:nth-child(2),
+.models-page > *:nth-child(2),
+.deployments-page > *:nth-child(2),
 .model-detail-page > *:nth-child(2),
 .deployment-detail-page > *:nth-child(2),
 .model-playground-page > *:nth-child(2) {
   animation-delay: 0.03s;
 }
 
-.dashboard > .el-row:nth-child(3) {
+.dashboard > *:nth-child(3) {
   animation-delay: 0.06s;
 }
 
@@ -159,25 +187,28 @@ body::before {
 .el-dialog,
 .el-message-box,
 .el-drawer {
-  background: var(--app-surface) !important;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.66), rgba(255, 255, 255, 0.52)) !important;
   border: 1px solid var(--app-border) !important;
   box-shadow: var(--app-shadow) !important;
-  backdrop-filter: blur(18px) saturate(130%);
-  -webkit-backdrop-filter: blur(18px) saturate(130%);
+  backdrop-filter: blur(26px) saturate(145%);
+  -webkit-backdrop-filter: blur(26px) saturate(145%);
 }
 
 .el-card {
-  border-radius: 18px !important;
+  border-radius: var(--app-radius-xl) !important;
   overflow: hidden;
   transition:
-    transform 0.26s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.26s cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 0.22s ease;
+    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.28s ease,
+    background-color 0.28s ease;
 }
 
 .el-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 24px 48px rgba(52, 72, 101, 0.1) !important;
+  transform: translateY(-4px);
+  box-shadow: var(--app-shadow-strong) !important;
+  border-color: rgba(92, 103, 116, 0.18) !important;
 }
 
 .el-card__header,
@@ -189,17 +220,17 @@ body::before {
 }
 
 .el-card__header {
-  border-bottom-color: rgba(148, 163, 184, 0.18) !important;
+  border-bottom-color: rgba(92, 103, 116, 0.12) !important;
 }
 
 .el-dialog {
-  border-radius: 20px !important;
+  border-radius: calc(var(--app-radius-xl) + 2px) !important;
 }
 
 .el-overlay {
-  background: rgba(245, 245, 247, 0.62) !important;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: rgba(244, 241, 235, 0.42) !important;
+  backdrop-filter: blur(18px) saturate(130%);
+  -webkit-backdrop-filter: blur(18px) saturate(130%);
 }
 
 .el-input__wrapper,
@@ -216,10 +247,10 @@ body::before {
 .el-alert,
 .el-tag {
   transition:
-    transform 0.35s ease,
-    box-shadow 0.35s ease,
-    background-color 0.35s ease,
-    border-color 0.35s ease;
+    transform 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.42s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.42s ease,
+    border-color 0.42s ease;
 }
 
 .el-input__wrapper,
@@ -231,24 +262,34 @@ body::before {
 .el-collapse-item__header,
 .el-collapse-item__wrap,
 .el-alert {
-  background: rgba(255, 255, 255, 0.88) !important;
-  border-color: rgba(17, 17, 17, 0.08) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92), 0 6px 18px rgba(15, 23, 42, 0.04);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.68) !important;
+  border-color: rgba(92, 103, 116, 0.08) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.92), 0 12px 24px rgba(37, 45, 57, 0.04);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.el-input__wrapper,
+.el-select__wrapper,
+.el-textarea__inner,
+.el-upload-dragger,
+.el-pagination button,
+.el-pager li {
+  border-radius: 12px;
 }
 
 .el-button {
-  border-radius: 10px !important;
+  border-radius: 12px !important;
   transition:
-    transform 0.18s cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 0.18s cubic-bezier(0.22, 1, 0.36, 1),
-    filter 0.18s ease !important;
+    transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.28s ease,
+    background-color 0.28s ease !important;
 }
 
 .el-button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 20px rgba(15, 23, 42, 0.08);
+  transform: translateY(-2px);
+  box-shadow: 0 16px 24px rgba(37, 45, 57, 0.09);
 }
 
 .el-button:active {
@@ -256,28 +297,28 @@ body::before {
 }
 
 .el-button--primary {
-  background: linear-gradient(180deg, #0077ed 0%, #0071e3 100%) !important;
+  background: linear-gradient(180deg, #3b688f 0%, #2f5b83 100%) !important;
   border-color: transparent !important;
 }
 
 .el-button--success {
-  background: linear-gradient(180deg, #34c759 0%, #2fb451 100%) !important;
+  background: linear-gradient(180deg, #2f8f6f 0%, #287b60 100%) !important;
   border-color: transparent !important;
 }
 
 .el-button--default {
-  background: rgba(255, 255, 255, 0.9) !important;
-  border-color: rgba(17, 17, 17, 0.08) !important;
+  background: rgba(255, 255, 255, 0.72) !important;
+  border-color: rgba(92, 103, 116, 0.12) !important;
   color: var(--app-text) !important;
 }
 
 .el-table,
 .el-descriptions__body {
-  border-radius: 14px;
+  border-radius: 18px;
   overflow: hidden;
-  background: rgba(255, 255, 255, 0.95) !important;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.56) !important;
+  backdrop-filter: blur(22px) saturate(138%);
+  -webkit-backdrop-filter: blur(22px) saturate(138%);
 }
 
 .el-table tr,
@@ -293,20 +334,21 @@ body::before {
   color: var(--app-text);
   font-weight: 600;
   font-size: 13px;
+  letter-spacing: 0.01em;
 }
 
 .el-table .el-table__row {
   transition:
-    transform 0.25s ease,
-    background-color 0.25s ease;
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    background-color 0.35s ease;
 }
 
 .el-table .el-table__row:hover > td.el-table__cell {
-  background: rgba(0, 113, 227, 0.03) !important;
+  background: rgba(47, 91, 131, 0.04) !important;
 }
 
 .el-table .el-table__row:hover {
-  transform: translateX(3px);
+  transform: translateX(4px);
 }
 
 .el-descriptions__label {
@@ -317,17 +359,18 @@ body::before {
 .el-input__wrapper:hover,
 .el-select__wrapper:hover,
 .el-textarea__inner:hover {
-  box-shadow: 0 12px 28px rgba(86, 108, 140, 0.14);
+  box-shadow: 0 18px 30px rgba(37, 45, 57, 0.08);
+  border-color: rgba(47, 91, 131, 0.18) !important;
 }
 
 .el-page-header {
   padding: 14px 18px;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.88);
-  border: 1px solid rgba(17, 17, 17, 0.06);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(92, 103, 116, 0.1);
   box-shadow: var(--app-shadow-soft);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(18px) saturate(138%);
+  -webkit-backdrop-filter: blur(18px) saturate(138%);
 }
 
 .card-header,
@@ -342,57 +385,62 @@ body::before {
 .config-code,
 .logs-content,
 .result-code {
-  background: rgba(251, 251, 253, 0.96) !important;
-  border: 1px solid rgba(17, 17, 17, 0.06);
+  background: rgba(250, 248, 244, 0.74) !important;
+  border: 1px solid rgba(92, 103, 116, 0.08);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  backdrop-filter: blur(14px) saturate(130%);
+  -webkit-backdrop-filter: blur(14px) saturate(130%);
 }
 
 .el-tag {
   border-radius: 999px;
   font-weight: 600;
+  padding-left: 10px;
+  padding-right: 10px;
 }
 
 .el-tag--info {
-  background: rgba(120, 120, 128, 0.08) !important;
-  color: #4a4a4f !important;
+  background: rgba(97, 112, 128, 0.1) !important;
+  color: #516070 !important;
   border-color: transparent !important;
 }
 
 .el-tag--success {
-  background: rgba(52, 199, 89, 0.1) !important;
-  color: #248a3d !important;
+  background: var(--app-success-soft) !important;
+  color: #266b53 !important;
   border-color: transparent !important;
 }
 
 .el-tag--warning {
-  background: rgba(255, 159, 10, 0.12) !important;
-  color: #b06800 !important;
+  background: var(--app-warning-soft) !important;
+  color: #8e6931 !important;
   border-color: transparent !important;
 }
 
 .el-tag--danger {
-  background: rgba(255, 59, 48, 0.1) !important;
-  color: #c9342c !important;
+  background: var(--app-danger-soft) !important;
+  color: #9d5348 !important;
   border-color: transparent !important;
 }
 
 @keyframes ambientFloat {
   0%,
   100% {
-    transform: translate3d(0, 0, 0) scale(1);
+    transform: translate3d(0, 0, 0) scale(1) rotate(0deg);
   }
-  50% {
-    transform: translate3d(0, 16px, 0) scale(1.04);
+  40% {
+    transform: translate3d(0, 22px, 0) scale(1.06) rotate(6deg);
+  }
+  65% {
+    transform: translate3d(-14px, 8px, 0) scale(0.98) rotate(-4deg);
   }
 }
 
 @keyframes sectionRise {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.995);
-    filter: blur(4px);
+    transform: translateY(14px) scale(0.988);
+    filter: blur(10px);
   }
   to {
     opacity: 1;
