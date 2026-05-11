@@ -157,53 +157,74 @@ onMounted(() => {
 .stat-card {
   display: flex;
   align-items: center;
-  padding: 10px;
+  padding: 12px;
+  min-height: 144px;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::after {
+  content: "";
+  position: absolute;
+  inset: auto -30px -55px auto;
+  width: 120px;
+  height: 120px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.26);
+  filter: blur(14px);
 }
 
 .stat-icon {
   width: 80px;
   height: 80px;
-  border-radius: 8px;
+  border-radius: 18px;
   display: flex;
   align-items: center;
   justify-content: center;
   margin-right: 20px;
+  box-shadow: 0 18px 34px rgba(86, 108, 140, 0.16);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  animation: floatIcon 5.5s ease-in-out infinite;
 }
 
 .stat-icon.blue {
-  background-color: #ecf5ff;
-  color: #409EFF;
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.18), rgba(125, 211, 252, 0.34));
+  color: #2563eb;
 }
 
 .stat-icon.green {
-  background-color: #f0f9eb;
-  color: #67C23A;
+  background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(187, 247, 208, 0.34));
+  color: #15803d;
 }
 
 .stat-icon.orange {
-  background-color: #fdf6ec;
-  color: #E6A23C;
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(253, 230, 138, 0.36));
+  color: #d97706;
 }
 
 .stat-icon.purple {
-  background-color: #f5f0ff;
-  color: #9254de;
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.16), rgba(191, 219, 254, 0.34));
+  color: #0369a1;
 }
 
 .stat-info {
   flex: 1;
+  position: relative;
+  z-index: 1;
 }
 
 .stat-value {
-  font-size: 28px;
-  font-weight: bold;
-  color: #303133;
-  line-height: 1;
+  font-size: 34px;
+  font-weight: 700;
+  color: #1f2937;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
 }
 
 .stat-label {
   font-size: 14px;
-  color: #909399;
+  color: #64748b;
   margin-top: 8px;
 }
 
@@ -227,8 +248,8 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 0;
-  border-bottom: 1px solid #ebeef5;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
 }
 
 .status-item:last-child {
@@ -237,12 +258,12 @@ onMounted(() => {
 
 .status-label {
   font-size: 14px;
-  color: #606266;
+  color: #475569;
 }
 
 .quick-actions {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
@@ -258,5 +279,15 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   justify-content: center;
+}
+
+@keyframes floatIcon {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
 }
 </style>

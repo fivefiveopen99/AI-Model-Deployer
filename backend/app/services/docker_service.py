@@ -790,53 +790,78 @@ class DockerService:
         """使用命令行异步构建镜像，支持进度回调"""
         import asyncio
 
-        # 使用 legacy builder 以兼容没有 buildx 组件的 Docker 环境。
-        env = os.environ.copy()
-        env['DOCKER_BUILDKIT'] = '0'
-        
-        process = await asyncio.create_subprocess_exec(
-            'docker', 'build', '-t', tag, build_context,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env
-        )
+        async def run_build_attempt(env_overrides=None, attempt_label="default builder"):
+            env = os.environ.copy()
+            if env_overrides:
+                env.update(env_overrides)
 
-        # 读取输出并发送进度
-        step = 0
-        error_lines = []
-        
-        async def read_stream(stream, is_stderr=False):
-            nonlocal step
-            while True:
-                line = await stream.readline()
-                if not line:
-                    break
-                line_str = line.decode('utf-8', errors='ignore').strip()
-                if line_str:
-                    print(f"Docker build: {line_str}")
-                    if is_stderr:
-                        error_lines.append(line_str)
+            process = await asyncio.create_subprocess_exec(
+                'docker', 'build', '-t', tag, build_context,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+
+            step = 0
+            output_lines = []
+
+            async def read_stream(stream, is_stderr=False):
+                nonlocal step
+                while True:
+                    line = await stream.readline()
+                    if not line:
+                        break
+                    line_str = line.decode('utf-8', errors='ignore').strip()
+                    if not line_str:
+                        continue
+                    print(f"Docker build ({attempt_label}): {line_str}")
+                    output_lines.append(line_str)
                     step += 1
-                    # 每10行输出更新一次进度 (50% -> 85%)
-                    if progress_callback and step % 10 == 0:
+                    if progress_callback:
                         progress = min(50 + step, 85)
-                        await progress_callback(progress, f"Building Docker image... ({step} steps)")
+                        await progress_callback(
+                            progress,
+                            line_str,
+                            {"log": line_str, "stream": "stderr" if is_stderr else "stdout"},
+                            persist_status=False
+                        )
+                        if step % 10 == 0:
+                            await progress_callback(progress, f"Building Docker image... ({step} steps)")
 
-        # 同时读取 stdout 和 stderr
-        await asyncio.gather(
-            read_stream(process.stdout, is_stderr=False),
-            read_stream(process.stderr, is_stderr=True)
+            await asyncio.gather(
+                read_stream(process.stdout, is_stderr=False),
+                read_stream(process.stderr, is_stderr=True)
+            )
+            await process.wait()
+
+            if process.returncode == 0:
+                return True, output_lines
+            return False, output_lines
+
+        success, output_lines = await run_build_attempt(attempt_label="default builder")
+        if success:
+            print("Docker build completed successfully")
+            return "Build completed"
+
+        error_text = "\n".join(output_lines[-20:]) if output_lines else "Docker build failed"
+        should_retry_legacy = (
+            "buildx component is missing or broken" in error_text
+            or "BuildKit is enabled but the buildx component is missing or broken" in error_text
         )
 
-        # 等待进程完成
-        await process.wait()
+        if should_retry_legacy:
+            if progress_callback:
+                await progress_callback(55, "BuildKit/buildx unavailable, retrying with legacy builder...")
+            success, output_lines = await run_build_attempt(
+                env_overrides={'DOCKER_BUILDKIT': '0'},
+                attempt_label="legacy builder"
+            )
+            if success:
+                print("Docker build completed successfully")
+                return "Build completed"
+            error_text = "\n".join(output_lines[-20:]) if output_lines else "Docker build failed"
 
-        if process.returncode != 0:
-            error_msg = "\n".join(error_lines[-10:]) if error_lines else "Docker build failed"
-            raise Exception(f"Docker build failed: {error_msg}")
-
-        print(f"Docker build completed successfully")
-        return "Build completed"
+        raise Exception(f"Docker build failed: {error_text}")
 
     def _get_image_info_cmd(self, image_tag: str) -> Dict:
         """使用命令行获取镜像信息"""

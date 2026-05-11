@@ -117,6 +117,7 @@ class DeploymentList(BaseModel):
 
 class BuildRequest(BaseModel):
     base_image: Optional[str] = "python:3.11-slim"
+    build_node: Optional[str] = "local"
 
 
 class BuildResponse(BaseModel):

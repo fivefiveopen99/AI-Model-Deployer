@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     
     # Docker Configuration
     LOCAL_IMAGE_PATH: str = "./data/images"
+    DOCKER_REGISTRY_URL: str = "10.10.25.69:5000/ai-models"
+    DOCKER_REGISTRY_PUSH_URL: Optional[str] = "localhost:5000/ai-models"
+    DOCKER_REGISTRY_USERNAME: str = ""
+    DOCKER_REGISTRY_PASSWORD: str = ""
     
     # Kubernetes
     K8S_CONFIG_PATH: Optional[str] = None

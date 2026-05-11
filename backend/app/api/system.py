@@ -48,3 +48,31 @@ async def health_check():
         "docker": docker_service.is_connected,
         "kubernetes": k8s_connected
     }
+
+
+@router.get("/build-nodes")
+async def get_build_nodes():
+    """获取可选构建节点，默认包含本机。"""
+    nodes = [
+        {
+            "name": "local",
+            "display_name": "本机",
+            "type": "local",
+            "internal_ip": None
+        }
+    ]
+
+    k8s_connected = await k8s_service.check_connection_async()
+    if not k8s_connected:
+        return {"items": nodes}
+
+    worker_nodes = await k8s_service.get_worker_nodes()
+    for node in worker_nodes:
+        nodes.append({
+            "name": node["name"],
+            "display_name": f"{node['name']} ({node.get('internal_ip') or 'no-ip'})",
+            "type": "k8s-worker",
+            "internal_ip": node.get("internal_ip")
+        })
+
+    return {"items": nodes}
