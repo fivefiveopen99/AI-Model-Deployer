@@ -256,56 +256,6 @@
           </el-form>
         </el-tab-pane>
 
-        <!-- 微调工作流 -->
-        <el-tab-pane label="微调工作流" name="finetune">
-          <el-form :model="finetuneForm" :rules="finetuneRules" ref="finetuneFormRef" label-width="100px">
-            <el-form-item label="模型名称" prop="name">
-              <el-input v-model="finetuneForm.name" placeholder="如：qwen2.5-lora-runtime" />
-            </el-form-item>
-            <el-form-item label="描述" prop="description">
-              <el-input v-model="finetuneForm.description" type="textarea" placeholder="请输入模型描述" />
-            </el-form-item>
-            <el-form-item label="模型类型" prop="model_type">
-              <el-select v-model="finetuneForm.model_type" style="width: 100%">
-                <el-option label="Custom" value="custom" />
-                <el-option label="LLaMA" value="llama" />
-                <el-option label="GPT" value="gpt" />
-                <el-option label="BERT" value="bert" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="模型目录">
-              <div class="directory-upload">
-                <el-radio-group v-model="finetuneForm.directory_mode">
-                  <el-radio label="none">不上传目录，仅构建运行时镜像</el-radio>
-                  <el-radio label="upload">上传本地模型目录</el-radio>
-                </el-radio-group>
-                <div v-if="finetuneForm.directory_mode === 'upload'" class="directory-upload-actions">
-                  <input
-                    ref="finetuneDirectoryInput"
-                    type="file"
-                    webkitdirectory
-                    directory
-                    multiple
-                    style="display: none"
-                    @change="handleFinetuneDirectoryChange"
-                  />
-                  <el-button type="primary" plain @click="pickFinetuneDirectory">
-                    选择本地目录
-                  </el-button>
-                  <span class="directory-summary">{{ finetuneDirectorySummary }}</span>
-                </div>
-              </div>
-            </el-form-item>
-            <el-form-item label="Dockerfile" prop="dockerfile_content">
-              <el-input
-                v-model="finetuneForm.dockerfile_content"
-                type="textarea"
-                :rows="14"
-                placeholder="直接填写用于构建训练/推理运行时镜像的 Dockerfile"
-              />
-            </el-form-item>
-          </el-form>
-        </el-tab-pane>
       </el-tabs>
 
       <template #footer>
@@ -344,7 +294,7 @@
 </template>
 
 <script setup>
-import { computed, ref, reactive, onMounted, onUnmounted, watch } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Loading, ArrowDown, CircleClose } from '@element-plus/icons-vue'
@@ -369,9 +319,6 @@ const activeTab = ref('github')
 const uploadRef = ref(null)
 const selectedFile = ref(null)
 const buildLogRef = ref(null)
-const finetuneFormRef = ref(null)
-const finetuneDirectoryInput = ref(null)
-const finetuneDirectoryFiles = ref([])
 
 // 上传进度条相关
 const uploadProgress = ref(0)
@@ -415,31 +362,9 @@ const otherRules = {
   source_path: [{ required: true, message: '请输入路径', trigger: 'blur' }]
 }
 
-const finetuneForm = reactive({
-  name: '',
-  description: '',
-  model_type: 'custom',
-  directory_mode: 'none',
-  dockerfile_content: ''
-})
-const finetuneRules = {
-  name: [{ required: true, message: '请输入模型名称', trigger: 'blur' }],
-  model_type: [{ required: true, message: '请选择模型类型', trigger: 'change' }],
-  dockerfile_content: [{ required: true, message: '请填写 Dockerfile', trigger: 'blur' }]
-}
-
 const buildForm = reactive({
   model_type: 'custom',
   base_image: 'python:3.11-slim'
-})
-
-const finetuneDirectorySummary = computed(() => {
-  if (!finetuneDirectoryFiles.value.length) {
-    return '未选择目录'
-  }
-  const firstPath = finetuneDirectoryFiles.value[0].webkitRelativePath || finetuneDirectoryFiles.value[0].name
-  const rootName = firstPath.split('/')[0]
-  return `已选择 ${rootName}，共 ${finetuneDirectoryFiles.value.length} 个文件`
 })
 
 const handleFileChange = (file) => {
@@ -453,15 +378,6 @@ const beforeUpload = (file) => {
     return false
   }
   return true
-}
-
-const pickFinetuneDirectory = () => {
-  finetuneDirectoryInput.value?.click()
-}
-
-const handleFinetuneDirectoryChange = (event) => {
-  const files = Array.from(event.target.files || [])
-  finetuneDirectoryFiles.value = files
 }
 
 const isFinetuneModel = (model) => {
@@ -484,16 +400,6 @@ const showCreateDialog = () => {
   otherForm.description = ''
   otherForm.source_type = 'url'
   otherForm.source_path = ''
-
-  finetuneForm.name = ''
-  finetuneForm.description = ''
-  finetuneForm.model_type = 'custom'
-  finetuneForm.directory_mode = 'none'
-  finetuneForm.dockerfile_content = ''
-  finetuneDirectoryFiles.value = []
-  if (finetuneDirectoryInput.value) {
-    finetuneDirectoryInput.value.value = ''
-  }
 
   activeTab.value = 'github'
   createDialogVisible.value = true
@@ -626,55 +532,6 @@ const submitCreate = async () => {
         uploadProgress.value = 100
         uploadProgressMessage.value = '添加完成！'
         ElMessage.success('模型添加成功')
-        refreshModels()
-      })
-    } else if (activeTab.value === 'finetune') {
-      await finetuneFormRef.value.validate(async (valid) => {
-        if (!valid) {
-          submitting.value = false
-          return
-        }
-
-        if (finetuneForm.directory_mode === 'upload' && !finetuneDirectoryFiles.value.length) {
-          ElMessage.error('请选择本地模型目录')
-          submitting.value = false
-          return
-        }
-
-        uploading.value = true
-        uploadProgress.value = 0
-        uploadProgressMessage.value = finetuneForm.directory_mode === 'upload' ? '正在上传模型目录...' : '正在创建微调模型...'
-        uploadError.value = ''
-        uploadProgressDialogVisible.value = true
-        createDialogVisible.value = false
-
-        const formData = new FormData()
-        formData.append('name', finetuneForm.name)
-        formData.append('description', finetuneForm.description || '')
-        formData.append('model_type', finetuneForm.model_type)
-        formData.append('dockerfile_content', finetuneForm.dockerfile_content)
-
-        if (finetuneForm.directory_mode === 'upload') {
-          finetuneDirectoryFiles.value.forEach((file) => {
-            formData.append('files', file, file.webkitRelativePath || file.name)
-          })
-        }
-
-        const onProgress = (progressEvent) => {
-          if (progressEvent.total) {
-            const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-            uploadProgress.value = percent
-            uploadProgressMessage.value = finetuneForm.directory_mode === 'upload'
-              ? `正在上传模型目录... ${percent}%`
-              : `正在创建微调模型... ${percent}%`
-          }
-        }
-
-        await modelsStore.createFinetuneModel(formData, onProgress)
-        uploading.value = false
-        uploadProgress.value = 100
-        uploadProgressMessage.value = '微调模型添加完成！'
-        ElMessage.success('微调模型添加成功')
         refreshModels()
       })
     }
@@ -953,23 +810,6 @@ onUnmounted(() => {
   font-size: 12px;
   color: #909399;
   margin-top: 5px;
-}
-
-.directory-upload {
-  width: 100%;
-}
-
-.directory-upload-actions {
-  margin-top: 12px;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.directory-summary {
-  font-size: 12px;
-  color: #606266;
 }
 
 .progress-content {

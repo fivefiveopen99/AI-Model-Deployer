@@ -6,6 +6,7 @@ import ModelDetail from '@/views/ModelDetail.vue'
 import Deployments from '@/views/Deployments.vue'
 import DeploymentDetail from '@/views/DeploymentDetail.vue'
 import ModelPlayground from '@/views/ModelPlayground.vue'
+import RegistryImages from '@/views/RegistryImages.vue'
 
 const routes = [
   {
@@ -41,6 +42,11 @@ const routes = [
         path: 'deployments/:id/playground',
         name: 'ModelPlayground',
         component: ModelPlayground
+      },
+      {
+        path: 'images',
+        name: 'RegistryImages',
+        component: RegistryImages
       }
     ]
   }

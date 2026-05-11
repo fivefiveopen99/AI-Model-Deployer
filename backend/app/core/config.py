@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     # Model Storage
     MODEL_STORAGE_PATH: str = "./data/models"
     BUILD_CONTEXT_PATH: str = "./data/builds"
+    LOCAL_IMAGE_ARCHIVE_PATH: str = "./data/images"
     
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:5173"]
@@ -44,3 +45,4 @@ settings = Settings()
 
 os.makedirs(settings.MODEL_STORAGE_PATH, exist_ok=True)
 os.makedirs(settings.BUILD_CONTEXT_PATH, exist_ok=True)
+os.makedirs(settings.LOCAL_IMAGE_ARCHIVE_PATH, exist_ok=True)

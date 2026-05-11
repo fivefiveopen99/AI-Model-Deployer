@@ -25,6 +25,10 @@
           <el-icon><Ship /></el-icon>
           <span>部署管理</span>
         </el-menu-item>
+        <el-menu-item index="/images">
+          <el-icon><Collection /></el-icon>
+          <span>镜像管理</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     

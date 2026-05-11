@@ -8,6 +8,7 @@ import aiofiles
 import zipfile
 import tarfile
 import subprocess
+from datetime import datetime
 
 from app.models.database import get_db, AIModel, ModelStatus
 from app.models.schemas import (
@@ -279,9 +280,9 @@ async def upload_model(
 
 @router.post("/finetune", response_model=ModelResponse)
 async def create_finetune_model(
-    name: str = Form(...),
+    name: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
-    model_type: str = Form(...),
+    model_type: str = Form("custom"),
     dockerfile_content: str = Form(...),
     files: List[UploadFile] = File(default=[]),
     db: AsyncSession = Depends(get_db)
@@ -290,7 +291,10 @@ async def create_finetune_model(
     if not dockerfile_content.strip():
         raise HTTPException(status_code=400, detail="Dockerfile 不能为空")
 
-    model_dir = os.path.join(settings.MODEL_STORAGE_PATH, safe_model_dir_name(name))
+    model_name = (name or "").strip() or f"dockerfile-build-{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    model_description = description if description is None else description.strip() or None
+
+    model_dir = os.path.join(settings.MODEL_STORAGE_PATH, safe_model_dir_name(model_name))
     workspace_dir = os.path.join(model_dir, "workspace")
     os.makedirs(model_dir, exist_ok=True)
 
@@ -303,8 +307,8 @@ async def create_finetune_model(
         model_files = find_model_files(workspace_dir) if uploaded_files else {}
 
         db_model = AIModel(
-            name=name,
-            description=description,
+            name=model_name,
+            description=model_description,
             model_type=model_type,
             source_type="file",
             source_path=source_path,
