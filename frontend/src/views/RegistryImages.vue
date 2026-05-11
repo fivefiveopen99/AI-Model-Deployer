@@ -98,16 +98,6 @@
               />
             </el-form-item>
           </el-form>
-
-          <el-progress
-            v-if="buildingImage"
-            :percentage="buildImageProgress"
-            :stroke-width="18"
-            striped
-            striped-flow
-            class="upload-progress"
-          />
-          <div v-if="buildingImage" class="build-hint">{{ buildImageMessage }}</div>
         </el-tab-pane>
 
         <el-tab-pane label="压缩包上传" name="package">
@@ -260,17 +250,82 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <el-dialog
+      v-model="registryBuildStore.progressDialogVisible"
+      title="手动构建进度"
+      width="760px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="!registryBuildStore.building"
+    >
+      <div class="progress-content">
+        <el-progress
+          :percentage="registryBuildStore.buildProgress"
+          :status="registryBuildStore.buildProgress === 100 ? 'success' : ''"
+          :stroke-width="20"
+          striped
+          striped-flow
+        />
+        <div class="progress-message">
+          <el-icon v-if="registryBuildStore.building" class="is-loading"><Refresh /></el-icon>
+          <span>{{ registryBuildStore.progressMessage }}</span>
+        </div>
+        <div v-if="registryBuildStore.buildError" class="progress-error">
+          <el-alert :title="registryBuildStore.buildError" type="error" show-icon />
+        </div>
+        <div v-if="registryBuildStore.resultImage" class="progress-result">
+          <el-alert :title="`已推送镜像：${registryBuildStore.resultImage}`" type="success" show-icon :closable="false" />
+        </div>
+        <div class="build-log-section">
+          <div class="build-log-header">
+            <span>构建日志</span>
+            <el-button text size="small" @click="clearBuildLogs">清空</el-button>
+          </div>
+          <pre ref="buildLogRef" class="build-log-content">{{ registryBuildStore.buildLogs.join('\n') || '等待构建日志...' }}</pre>
+        </div>
+      </div>
+      <template #footer>
+        <div class="dialog-footer">
+          <el-button v-if="registryBuildStore.building" type="primary" @click="minimizeBuildProgress">
+            最小化到后台
+          </el-button>
+          <el-button @click="closeBuildProgressDialog" :disabled="registryBuildStore.building">
+            {{ registryBuildStore.building ? '构建中...' : '关闭' }}
+          </el-button>
+        </div>
+      </template>
+    </el-dialog>
+
+    <div
+      v-if="registryBuildStore.isProgressMinimized && registryBuildStore.building"
+      class="minimized-progress"
+      @click="restoreBuildProgress"
+    >
+      <div class="minimized-content">
+        <el-icon class="is-loading"><Refresh /></el-icon>
+        <span class="minimized-text">构建中 {{ registryBuildStore.buildProgress }}%</span>
+        <el-progress
+          :percentage="registryBuildStore.buildProgress"
+          :show-text="false"
+          :stroke-width="4"
+          class="minimized-bar"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Upload } from '@element-plus/icons-vue'
 import { systemApi } from '@/api'
-import { useModelsStore } from '@/stores/models'
+import { useWebSocket } from '@/composables/useWebSocket'
+import { useRegistryBuildStore } from '@/stores/registryBuild'
 
-const modelsStore = useModelsStore()
+const registryBuildStore = useRegistryBuildStore()
+const { error: wsError, lastMessage, subscribe } = useWebSocket()
 const loading = ref(false)
 const images = ref([])
 const registryUrl = ref('')
@@ -287,14 +342,11 @@ const uploadFormRef = ref(null)
 const localUploadFormRef = ref(null)
 const buildImageFormRef = ref(null)
 const uploadRef = ref(null)
+const buildLogRef = ref(null)
 
 const selectedFile = ref(null)
 const uploading = ref(false)
 const uploadProgress = ref(0)
-
-const buildingImage = ref(false)
-const buildImageProgress = ref(0)
-const buildImageMessage = ref('')
 
 const localUploading = ref(false)
 const localUploadProgress = ref(0)
@@ -351,7 +403,7 @@ const flatImages = computed(() => {
   })
 })
 
-const dialogBusy = computed(() => uploading.value || buildingImage.value || localUploading.value)
+const dialogBusy = computed(() => uploading.value || registryBuildStore.building || localUploading.value)
 
 const activeUploadActionText = computed(() => {
   if (activeUploadTab.value === 'build') {
@@ -409,8 +461,6 @@ const resetLocalUploadForm = () => {
 
 const resetBuildImageForm = () => {
   buildImageForm.dockerfile_content = ''
-  buildImageProgress.value = 0
-  buildImageMessage.value = ''
 }
 
 const resetImageUploadDialog = () => {
@@ -548,34 +598,25 @@ const submitBuildImage = async () => {
       return
     }
 
-    buildingImage.value = true
-    buildImageProgress.value = 0
-    buildImageMessage.value = '正在创建构建任务...'
+    registryBuildStore.startBuild()
 
     try {
       const formData = new FormData()
       formData.append('dockerfile_content', buildImageForm.dockerfile_content)
 
-      const createdModel = await modelsStore.createFinetuneModel(formData, (progressEvent) => {
-        if (progressEvent.total) {
-          buildImageProgress.value = Math.round((progressEvent.loaded * 70) / progressEvent.total)
-        }
-      })
+      const result = await systemApi.buildRegistryImage(formData)
+      if (result.data?.task_id) {
+        registryBuildStore.setTask(result.data.task_id)
+        subscribe(result.data.task_id)
+      }
 
-      buildImageProgress.value = 80
-      buildImageMessage.value = '模型已创建，正在启动镜像构建...'
-
-      await modelsStore.buildModel(createdModel.id, { base_image: 'python:3.11-slim' })
-
-      buildImageProgress.value = 100
-      buildImageMessage.value = '镜像构建任务已启动'
-      ElMessage.success('镜像构建任务已启动，请在模型管理中查看构建进度')
       imageUploadDialogVisible.value = false
+      registryBuildStore.updateProgress(0, '镜像构建任务已启动')
       resetImageUploadDialog()
     } catch (err) {
-      ElMessage.error(err.response?.data?.detail || err.message || '启动镜像构建失败')
-    } finally {
-      buildingImage.value = false
+      const message = err.response?.data?.detail || err.message || '启动镜像构建失败'
+      registryBuildStore.setError(message)
+      ElMessage.error(message)
     }
   })
 }
@@ -631,6 +672,23 @@ const submitActiveUpload = async () => {
   await submitPackageUpload()
 }
 
+const minimizeBuildProgress = () => {
+  registryBuildStore.minimizeProgress()
+  ElMessage.info('构建任务已在后台运行，点击悬浮窗可查看进度')
+}
+
+const restoreBuildProgress = () => {
+  registryBuildStore.restoreProgress()
+}
+
+const closeBuildProgressDialog = () => {
+  registryBuildStore.closeProgress()
+}
+
+const clearBuildLogs = () => {
+  registryBuildStore.setLogs([])
+}
+
 const deleteImage = async (row) => {
   try {
     await ElMessageBox.confirm(
@@ -658,6 +716,67 @@ const deleteImage = async (row) => {
 
 onMounted(() => {
   fetchImages()
+  const persisted = registryBuildStore.restorePersistedState()
+  if (persisted?.building && registryBuildStore.currentTaskId) {
+    registryBuildStore.resumeBuild({
+      taskId: registryBuildStore.currentTaskId,
+      progress: registryBuildStore.buildProgress,
+      message: registryBuildStore.progressMessage || '构建任务恢复中...',
+      minimized: true
+    })
+    subscribe(registryBuildStore.currentTaskId)
+  }
+})
+
+const unwatchMessage = watch(() => lastMessage.value, async (message) => {
+  if (!message) return
+
+  if (message.type === 'log_history') {
+    registryBuildStore.setLogs(message.logs || [])
+    return
+  }
+
+  if (message.type !== 'progress' || message.task_id !== registryBuildStore.currentTaskId) {
+    return
+  }
+
+  registryBuildStore.updateProgress(message.progress, message.data?.log ? null : message.message)
+  if (message.data?.log) {
+    registryBuildStore.addLog(message.data.log)
+  }
+
+  if (message.data?.error) {
+    registryBuildStore.setError(message.message)
+    ElMessage.error(message.message)
+    return
+  }
+
+  if (message.progress === 100) {
+    registryBuildStore.completeBuild(message.data?.registry_image || '')
+    ElMessage.success(message.data?.registry_image ? `镜像构建成功：${message.data.registry_image}` : '镜像构建成功')
+    await fetchImages()
+  }
+})
+
+const unwatchWsError = watch(() => wsError.value, (message) => {
+  if (!message || !registryBuildStore.building) {
+    return
+  }
+  registryBuildStore.setError(message)
+  ElMessage.error(`构建失败: ${message}`)
+})
+
+watch(() => registryBuildStore.buildLogs.length, () => {
+  setTimeout(() => {
+    if (buildLogRef.value) {
+      buildLogRef.value.scrollTop = buildLogRef.value.scrollHeight
+    }
+  }, 0)
+})
+
+onUnmounted(() => {
+  unwatchMessage()
+  unwatchWsError()
 })
 </script>
 
@@ -732,6 +851,58 @@ onMounted(() => {
   color: #606266;
 }
 
+.progress-content {
+  padding: 20px 0;
+}
+
+.progress-message {
+  margin-top: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #606266;
+}
+
+.progress-error,
+.progress-result {
+  margin-top: 16px;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.build-log-section {
+  margin-top: 20px;
+}
+
+.build-log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  color: #606266;
+  font-size: 13px;
+}
+
+.build-log-content {
+  margin: 0;
+  padding: 12px;
+  min-height: 220px;
+  max-height: 360px;
+  overflow: auto;
+  background: #111827;
+  color: #e5e7eb;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: Consolas, Monaco, 'Courier New', monospace;
+}
+
 .browser-toolbar {
   display: flex;
   align-items: center;
@@ -770,6 +941,39 @@ onMounted(() => {
 
 .directory-button {
   padding: 0;
+}
+
+.minimized-progress {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  width: 240px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #409eff, #66b1ff);
+  box-shadow: 0 16px 32px rgba(64, 158, 255, 0.28);
+  color: #fff;
+  cursor: pointer;
+  z-index: 2000;
+}
+
+.minimized-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.minimized-text {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.minimized-bar :deep(.el-progress-bar__outer) {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+.minimized-bar :deep(.el-progress-bar__inner) {
+  background: #fff;
 }
 
 .mb-16 {

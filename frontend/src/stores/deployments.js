@@ -9,6 +9,7 @@ export const useDeploymentsStore = defineStore('deployments', () => {
   const loading = ref(false)
   const total = ref(0)
   const logs = ref('')
+  const inferenceResult = ref(null)
 
   // Getters
   const deploymentList = computed(() => deployments.value)
@@ -74,6 +75,47 @@ export const useDeploymentsStore = defineStore('deployments', () => {
     }
   }
 
+  const runInference = async (id, variables = {}) => {
+    try {
+      const response = await deploymentsApi.runInference(id, { variables })
+      return response.data
+    } catch (error) {
+      console.error('Failed to run inference:', error)
+      throw error
+    }
+  }
+
+  const fetchInferenceResult = async (id) => {
+    try {
+      const response = await deploymentsApi.getInferenceResult(id)
+      inferenceResult.value = response.data
+      return response.data
+    } catch (error) {
+      console.error('Failed to fetch inference result:', error)
+      throw error
+    }
+  }
+
+  const previewInferenceFile = async (id, fileKey, responseType = 'text') => {
+    try {
+      const response = await deploymentsApi.previewInferenceFile(id, fileKey, responseType)
+      return response
+    } catch (error) {
+      console.error('Failed to preview inference file:', error)
+      throw error
+    }
+  }
+
+  const downloadInferenceFile = async (id, fileKey) => {
+    try {
+      const response = await deploymentsApi.downloadInferenceFile(id, fileKey)
+      return response
+    } catch (error) {
+      console.error('Failed to download inference file:', error)
+      throw error
+    }
+  }
+
   const deleteDeployment = async (id) => {
     try {
       await deploymentsApi.delete(id)
@@ -121,6 +163,7 @@ export const useDeploymentsStore = defineStore('deployments', () => {
     loading,
     total,
     logs,
+    inferenceResult,
     deploymentList,
     isLoading,
     fetchDeployments,
@@ -128,6 +171,10 @@ export const useDeploymentsStore = defineStore('deployments', () => {
     createDeployment,
     deployToK8s,
     scaleDeployment,
+    runInference,
+    fetchInferenceResult,
+    previewInferenceFile,
+    downloadInferenceFile,
     deleteDeployment,
     getDeploymentStatus,
     getDeploymentLogs,

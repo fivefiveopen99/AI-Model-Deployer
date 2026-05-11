@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     K8S_CONFIG_PATH: Optional[str] = None
     K8S_NAMESPACE: str = "default"
     K8S_IMAGE_PULL_SECRET_NAME: Optional[str] = ""
+    K8S_NFS_SERVER: str = ""
+    K8S_NFS_EXPORT_ROOT: str = ""
+    K8S_NFS_BROWSE_ROOT: str = ""
+    K8S_NFS_SHOWMOUNT_HOST: str = ""
     
     # Model Storage
     MODEL_STORAGE_PATH: str = "./data/models"

@@ -61,13 +61,20 @@ class Deployment(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(255), nullable=False)
-    model_id = Column(Integer, nullable=False)
+    model_id = Column(Integer, nullable=False, default=0)
+    source_type = Column(String(50), nullable=False, default="model")
+    image = Column(String(500), nullable=True)
+    port = Column(Integer, nullable=False, default=8000)
     
     # K8s配置
     namespace = Column(String(100), default="default")
     replicas = Column(Integer, default=1)
     resources = Column(JSON, default=dict)  # CPU, Memory, GPU配置
     env_vars = Column(JSON, default=dict)
+    mount_config = Column(JSON, default=dict)
+    command = Column(Text, nullable=True)
+    inference_config = Column(JSON, default=dict)
+    last_inference_result = Column(JSON, default=dict)
     
     # 状态
     status = Column(Enum(DeployStatus), default=DeployStatus.PENDING)
@@ -86,6 +93,28 @@ class Deployment(Base):
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if engine.url.get_backend_name() == "sqlite":
+            await _ensure_sqlite_columns(conn)
+
+
+async def _ensure_sqlite_columns(conn):
+    result = await conn.exec_driver_sql("PRAGMA table_info(deployments)")
+    columns = {row[1] for row in result.fetchall()}
+
+    if "source_type" not in columns:
+        await conn.exec_driver_sql("ALTER TABLE deployments ADD COLUMN source_type VARCHAR(50) NOT NULL DEFAULT 'model'")
+    if "image" not in columns:
+        await conn.exec_driver_sql("ALTER TABLE deployments ADD COLUMN image VARCHAR(500)")
+    if "port" not in columns:
+        await conn.exec_driver_sql("ALTER TABLE deployments ADD COLUMN port INTEGER NOT NULL DEFAULT 8000")
+    if "mount_config" not in columns:
+        await conn.exec_driver_sql("ALTER TABLE deployments ADD COLUMN mount_config JSON")
+    if "command" not in columns:
+        await conn.exec_driver_sql("ALTER TABLE deployments ADD COLUMN command TEXT")
+    if "inference_config" not in columns:
+        await conn.exec_driver_sql("ALTER TABLE deployments ADD COLUMN inference_config JSON")
+    if "last_inference_result" not in columns:
+        await conn.exec_driver_sql("ALTER TABLE deployments ADD COLUMN last_inference_result JSON")
 
 
 async def get_db():

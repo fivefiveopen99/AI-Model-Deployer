@@ -10,6 +10,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       - /usr/bin/docker:/usr/bin/docker:ro
       - ~/.kube:/root/.kube:ro
+      - /share:/share:ro
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./data/models.db
       - REDIS_URL=redis://redis:6379/0
@@ -20,6 +21,10 @@ services:
       - K8S_CONFIG_PATH=${K8S_CONFIG_PATH:-}
       - K8S_NAMESPACE=${K8S_NAMESPACE:-default}
       - K8S_IMAGE_PULL_SECRET_NAME=${K8S_IMAGE_PULL_SECRET_NAME:-}
+      - K8S_NFS_SERVER=${K8S_NFS_SERVER:-}
+      - K8S_NFS_EXPORT_ROOT=${K8S_NFS_EXPORT_ROOT:-}
+      - K8S_NFS_BROWSE_ROOT=${K8S_NFS_BROWSE_ROOT:-}
+      - K8S_NFS_SHOWMOUNT_HOST=${K8S_NFS_SHOWMOUNT_HOST:-}
       - DOCKER_HOST=unix:///var/run/docker.sock
       - HTTP_PROXY=${BACKEND_HTTP_PROXY:-}
       - HTTPS_PROXY=${BACKEND_HTTPS_PROXY:-}
