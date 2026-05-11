@@ -55,7 +55,23 @@ export const deploymentsApi = {
 // System API
 export const systemApi = {
   getStatus: () => api.get('/system/status'),
-  healthCheck: () => api.get('/system/health')
+  healthCheck: () => api.get('/system/health'),
+  getRegistryImages: () => api.get('/system/registry-images'),
+  getLocalRegistryImagePackages: (path = '') => api.get('/system/registry-images/local-packages', {
+    params: { path }
+  }),
+  deleteRegistryImage: (repository, tag) => api.delete('/system/registry-images', {
+    params: { repository, tag }
+  }),
+  uploadRegistryImage: (formData, onProgress) => api.post('/system/registry-images/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 3600000,
+    onUploadProgress: onProgress
+  }),
+  uploadLocalRegistryImage: (formData) => api.post('/system/registry-images/upload-local', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 3600000
+  })
 }
 
 export default api

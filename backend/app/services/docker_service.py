@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 import json
@@ -6,6 +7,7 @@ import socket
 from typing import Optional, Dict, Any, Callable
 import asyncio
 from datetime import datetime
+from urllib.parse import urlparse
 
 from app.core.config import settings
 from app.services.model_service_template import MODEL_SERVICE_TEMPLATE
@@ -1023,6 +1025,303 @@ class DockerService:
         if process.returncode != 0:
             error_msg = "\n".join(output_lines[-10:]) if output_lines else "Unknown error"
             raise Exception(f"{error_prefix}: {error_msg}")
+
+    def _get_registry_http_config(self) -> Dict[str, Optional[str]]:
+        registry_url = settings.DOCKER_REGISTRY_URL.rstrip("/")
+        if not registry_url:
+            raise Exception("DOCKER_REGISTRY_URL is not configured")
+
+        normalized = registry_url if "://" in registry_url else f"http://{registry_url}"
+        parsed = urlparse(normalized)
+        if not parsed.netloc:
+            raise Exception(f"Invalid DOCKER_REGISTRY_URL: {settings.DOCKER_REGISTRY_URL}")
+
+        namespace_prefix = parsed.path.strip("/") or None
+        return {
+            "api_base": f"{parsed.scheme}://{parsed.netloc}/v2",
+            "registry_url": registry_url,
+            "registry_host": parsed.netloc,
+            "namespace_prefix": namespace_prefix,
+        }
+
+    async def list_registry_images(self) -> Dict[str, Any]:
+        import httpx
+
+        registry_config = self._get_registry_http_config()
+        api_base = registry_config["api_base"]
+        namespace_prefix = registry_config["namespace_prefix"]
+
+        auth = None
+        if settings.DOCKER_REGISTRY_USERNAME and settings.DOCKER_REGISTRY_PASSWORD:
+            auth = (settings.DOCKER_REGISTRY_USERNAME, settings.DOCKER_REGISTRY_PASSWORD)
+
+        async with httpx.AsyncClient(timeout=30.0, trust_env=False, auth=auth) as client:
+            catalog_response = await client.get(f"{api_base}/_catalog", params={"n": 10000})
+            if catalog_response.status_code == 400:
+                catalog_response = await client.get(f"{api_base}/_catalog")
+            catalog_response.raise_for_status()
+            repositories = catalog_response.json().get("repositories", [])
+
+            if namespace_prefix:
+                repositories = [
+                    repo for repo in repositories
+                    if repo == namespace_prefix or repo.startswith(f"{namespace_prefix}/")
+                ]
+
+            items = []
+            for repository in sorted(repositories):
+                tags_response = await client.get(f"{api_base}/{repository}/tags/list")
+                tags_response.raise_for_status()
+                payload = tags_response.json()
+                tags = sorted(payload.get("tags") or [])
+                items.append({
+                    "repository": repository,
+                    "display_name": repository[len(namespace_prefix) + 1:] if namespace_prefix and repository.startswith(f"{namespace_prefix}/") else repository,
+                    "tags": tags,
+                    "tag_count": len(tags),
+                    "image_refs": [f"{repository}:{tag}" for tag in tags]
+                })
+
+        return {
+            "registry_url": registry_config["registry_url"],
+            "registry_host": registry_config["registry_host"],
+            "namespace_prefix": namespace_prefix,
+            "total_repositories": len(items),
+            "total_tags": sum(item["tag_count"] for item in items),
+            "items": items
+        }
+
+    async def delete_registry_image(self, repository: str, tag: str) -> Dict[str, Any]:
+        import httpx
+
+        if not repository.strip():
+            raise Exception("Repository is required")
+        if not tag.strip():
+            raise Exception("Tag is required")
+
+        registry_config = self._get_registry_http_config()
+        api_base = registry_config["api_base"]
+        auth = None
+        if settings.DOCKER_REGISTRY_USERNAME and settings.DOCKER_REGISTRY_PASSWORD:
+            auth = (settings.DOCKER_REGISTRY_USERNAME, settings.DOCKER_REGISTRY_PASSWORD)
+
+        manifest_headers = {
+            "Accept": ",".join([
+                "application/vnd.docker.distribution.manifest.v2+json",
+                "application/vnd.oci.image.manifest.v1+json",
+                "application/vnd.docker.distribution.manifest.list.v2+json",
+                "application/vnd.oci.image.index.v1+json",
+            ])
+        }
+
+        async with httpx.AsyncClient(timeout=30.0, trust_env=False, auth=auth) as client:
+            digest = None
+            head_response = await client.head(f"{api_base}/{repository}/manifests/{tag}", headers=manifest_headers)
+            if head_response.status_code < 400:
+                digest = head_response.headers.get("Docker-Content-Digest") or head_response.headers.get("docker-content-digest")
+
+            if not digest:
+                manifest_response = await client.get(f"{api_base}/{repository}/manifests/{tag}", headers=manifest_headers)
+                manifest_response.raise_for_status()
+                digest = manifest_response.headers.get("Docker-Content-Digest") or manifest_response.headers.get("docker-content-digest")
+
+            if not digest:
+                raise Exception(f"Failed to resolve manifest digest for {repository}:{tag}")
+
+            delete_response = await client.delete(f"{api_base}/{repository}/manifests/{digest}")
+            if delete_response.status_code not in (202, 200):
+                delete_response.raise_for_status()
+
+        return {
+            "success": True,
+            "repository": repository,
+            "tag": tag,
+            "digest": digest
+        }
+
+    def _build_registry_image_refs(self, repository: str, tag: str) -> Dict[str, str]:
+        repository = repository.strip().strip("/")
+        tag = tag.strip()
+        if not repository:
+            raise Exception("Repository is required")
+        if not tag:
+            raise Exception("Tag is required")
+
+        registry_url = settings.DOCKER_REGISTRY_URL.rstrip("/")
+        push_registry_url = (settings.DOCKER_REGISTRY_PUSH_URL or settings.DOCKER_REGISTRY_URL).rstrip("/")
+        registry_host = push_registry_url.split("/", 1)[0]
+        return {
+            "registry_image": f"{registry_url}/{repository}:{tag}",
+            "push_image": f"{push_registry_url}/{repository}:{tag}",
+            "registry_host": registry_host,
+            "registry": registry_url,
+            "push_registry": push_registry_url
+        }
+
+    def _get_local_image_archive_root(self) -> str:
+        root = os.path.realpath(settings.LOCAL_IMAGE_ARCHIVE_PATH)
+        os.makedirs(root, exist_ok=True)
+        return root
+
+    def _resolve_local_image_archive_path(self, relative_path: str = "") -> str:
+        root = self._get_local_image_archive_root()
+        normalized = (relative_path or "").replace("\\", "/").strip("/")
+        candidate = os.path.realpath(os.path.join(root, normalized))
+        if candidate != root and not candidate.startswith(f"{root}{os.sep}"):
+            raise Exception("Invalid local image archive path")
+        return candidate
+
+    async def list_local_image_archives(self, relative_path: str = "") -> Dict[str, Any]:
+        root = self._get_local_image_archive_root()
+        current_dir = self._resolve_local_image_archive_path(relative_path)
+
+        if not os.path.exists(current_dir):
+            raise Exception(f"Directory not found: {relative_path or '/'}")
+        if not os.path.isdir(current_dir):
+            raise Exception("Selected path is not a directory")
+
+        directories = []
+        files = []
+        for name in sorted(os.listdir(current_dir)):
+            full_path = os.path.join(current_dir, name)
+            relative_item_path = os.path.relpath(full_path, root).replace("\\", "/")
+            if os.path.isdir(full_path):
+                directories.append({
+                    "name": name,
+                    "path": "" if relative_item_path == "." else relative_item_path
+                })
+                continue
+
+            if os.path.isfile(full_path) and name.lower().endswith(".tar"):
+                stat = os.stat(full_path)
+                files.append({
+                    "name": name,
+                    "path": "" if relative_item_path == "." else relative_item_path,
+                    "size": stat.st_size,
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat()
+                })
+
+        current_relative_path = os.path.relpath(current_dir, root).replace("\\", "/")
+        current_relative_path = "" if current_relative_path == "." else current_relative_path
+        parent_dir = None
+        if current_dir != root:
+            parent_relative_path = os.path.relpath(os.path.dirname(current_dir), root).replace("\\", "/")
+            parent_dir = "" if parent_relative_path == "." else parent_relative_path
+
+        return {
+            "root_path": root,
+            "current_path": current_relative_path,
+            "parent_path": parent_dir,
+            "directories": directories,
+            "files": files
+        }
+
+    async def upload_local_image_archive_to_registry(
+        self,
+        package_path: str,
+        repository: str,
+        tag: str,
+        progress_callback: Optional[Callable] = None
+    ) -> Dict[str, Any]:
+        archive_path = self._resolve_local_image_archive_path(package_path)
+        if not os.path.exists(archive_path):
+            raise Exception(f"Image package not found: {package_path}")
+        if not os.path.isfile(archive_path):
+            raise Exception("Selected path is not a file")
+        if not archive_path.lower().endswith(".tar"):
+            raise Exception("Only .tar image packages are supported")
+
+        result = await self.upload_image_tar_to_registry(
+            tar_path=archive_path,
+            repository=repository,
+            tag=tag,
+            progress_callback=progress_callback
+        )
+        result["package_path"] = package_path
+        return result
+
+    async def _load_image_from_tar_async(self, tar_path: str) -> Dict[str, Any]:
+        process = await asyncio.create_subprocess_exec(
+            "docker", "load", "-i", tar_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+        output = "\n".join([
+            stdout.decode("utf-8", errors="ignore"),
+            stderr.decode("utf-8", errors="ignore")
+        ]).strip()
+
+        if process.returncode != 0:
+            raise Exception(f"Docker load failed: {output or 'Unknown error'}")
+
+        loaded_refs = re.findall(r"Loaded image:\s*([^\s]+)", output)
+        loaded_ids = re.findall(r"Loaded image ID:\s*([^\s]+)", output)
+        source_image = loaded_refs[-1] if loaded_refs else (loaded_ids[-1] if loaded_ids else None)
+        if not source_image:
+            raise Exception(f"Unable to detect loaded image reference from docker load output: {output}")
+
+        return {
+            "source_image": source_image,
+            "output": output,
+            "loaded_refs": loaded_refs,
+            "loaded_ids": loaded_ids
+        }
+
+    async def upload_image_tar_to_registry(
+        self,
+        tar_path: str,
+        repository: str,
+        tag: str,
+        progress_callback: Optional[Callable] = None
+    ) -> Dict[str, Any]:
+        if not self.is_connected:
+            raise Exception("Docker is not connected")
+        if not os.path.exists(tar_path):
+            raise Exception(f"Image tar file not found: {tar_path}")
+
+        refs = self._build_registry_image_refs(repository, tag)
+        if progress_callback:
+            await progress_callback(10, "Loading image tar into local Docker...")
+
+        load_result = await self._load_image_from_tar_async(tar_path)
+
+        if progress_callback:
+            await progress_callback(35, f"Loaded image {load_result['source_image']}, tagging for registry...")
+
+        self._ensure_registry_host_resolves(refs["registry_host"])
+        if settings.DOCKER_REGISTRY_USERNAME and settings.DOCKER_REGISTRY_PASSWORD:
+            await self._docker_login_async(
+                refs["registry_host"],
+                settings.DOCKER_REGISTRY_USERNAME,
+                settings.DOCKER_REGISTRY_PASSWORD
+            )
+
+        await self._run_docker_command_async(
+            ["docker", "tag", load_result["source_image"], refs["push_image"]],
+            "Docker tag failed"
+        )
+
+        if progress_callback:
+            await progress_callback(60, f"Pushing image to {refs['push_registry']}...")
+
+        await self._run_docker_command_async(
+            ["docker", "push", refs["push_image"]],
+            "Docker push failed",
+            progress_callback=progress_callback,
+            progress_start=60,
+            progress_end=95
+        )
+
+        return {
+            "success": True,
+            "source_image": load_result["source_image"],
+            "registry_image": refs["registry_image"],
+            "push_image": refs["push_image"],
+            "registry": refs["registry"],
+            "push_registry": refs["push_registry"],
+            "load_output": load_result["output"]
+        }
 
     async def _prepare_model_files(
         self,
