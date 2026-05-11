@@ -44,6 +44,18 @@ export const deploymentsApi = {
   getDetail: (id) => api.get(`/deployments/${id}`),
   create: (data) => api.post('/deployments', data),
   deploy: (id) => api.post(`/deployments/${id}/deploy`),
+  runInference: (id, data) => api.post(`/deployments/${id}/run-inference`, data, {
+    timeout: 3600000
+  }),
+  getInferenceResult: (id) => api.get(`/deployments/${id}/inference-result`),
+  previewInferenceFile: (id, fileKey, responseType = 'text') => api.get(
+    `/deployments/${id}/inference-files/${fileKey}/preview`,
+    { responseType }
+  ),
+  downloadInferenceFile: (id, fileKey) => api.get(
+    `/deployments/${id}/inference-files/${fileKey}/download`,
+    { responseType: 'blob' }
+  ),
   update: (id, data) => api.put(`/deployments/${id}`, data),
   delete: (id) => api.delete(`/deployments/${id}`),
   scale: (id, replicas) => api.put(`/deployments/${id}/scale?replicas=${replicas}`),
@@ -56,7 +68,14 @@ export const deploymentsApi = {
 export const systemApi = {
   getStatus: () => api.get('/system/status'),
   healthCheck: () => api.get('/system/health'),
+  getNfsDirectories: (path = '') => api.get('/system/nfs/directories', {
+    params: { path }
+  }),
   getRegistryImages: () => api.get('/system/registry-images'),
+  buildRegistryImage: (formData) => api.post('/system/registry-images/build', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 3600000
+  }),
   getLocalRegistryImagePackages: (path = '') => api.get('/system/registry-images/local-packages', {
     params: { path }
   }),

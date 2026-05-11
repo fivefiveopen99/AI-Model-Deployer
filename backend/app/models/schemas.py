@@ -77,27 +77,43 @@ class ModelList(BaseModel):
 
 class DeploymentCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
-    model_id: int
+    model_id: Optional[int] = None
+    source_type: str = Field(default="model")
+    image: Optional[str] = None
+    port: int = Field(default=8000, ge=1, le=65535)
     namespace: str = Field(default="default")
     replicas: int = Field(default=1, ge=1, le=100)
     resources: Dict[str, Any] = Field(default_factory=dict)
     env_vars: Dict[str, str] = Field(default_factory=dict)
+    mount_config: Dict[str, Any] = Field(default_factory=dict)
+    command: Optional[str] = None
+    inference_config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DeploymentUpdate(BaseModel):
     replicas: Optional[int] = Field(None, ge=0, le=100)
     resources: Optional[Dict[str, Any]] = None
     env_vars: Optional[Dict[str, str]] = None
+    mount_config: Optional[Dict[str, Any]] = None
+    command: Optional[str] = None
+    inference_config: Optional[Dict[str, Any]] = None
 
 
 class DeploymentResponse(BaseModel):
     id: int
     name: str
-    model_id: int
+    model_id: Optional[int]
+    source_type: str
+    image: Optional[str]
+    port: int
     namespace: str
     replicas: int
     resources: Dict[str, Any]
     env_vars: Dict[str, str]
+    mount_config: Dict[str, Any]
+    command: Optional[str]
+    inference_config: Dict[str, Any]
+    last_inference_result: Dict[str, Any]
     status: str
     status_message: Optional[str]
     k8s_deployment_name: Optional[str]
@@ -130,6 +146,10 @@ class TaskStatus(BaseModel):
     progress: int
     message: Optional[str]
     result: Optional[Dict[str, Any]] = None
+
+
+class InferenceRunRequest(BaseModel):
+    variables: Dict[str, str] = Field(default_factory=dict)
 
 
 class SystemStatus(BaseModel):

@@ -1,7 +1,10 @@
 from kubernetes import client, config
 from kubernetes.client.rest import ApiException
+from kubernetes.stream import stream
 import os
-from typing import Optional, Dict, Any, List
+import shlex
+import base64
+from typing import Optional, Dict, Any, List, Callable
 import asyncio
 
 from app.core.config import settings
@@ -85,11 +88,14 @@ class K8sService:
         self,
         deployment_name: str,
         model_id: int,
+        source_type: str,
         image_tag: str,
         namespace: str = "default",
         replicas: int = 1,
         resources: Dict[str, Any] = None,
         env_vars: Dict[str, str] = None,
+        mount_config: Dict[str, Any] = None,
+        command: Optional[str] = None,
         port: int = 8000,
         progress_callback: Optional[callable] = None
     ) -> Dict[str, Any]:
@@ -98,8 +104,11 @@ class K8sService:
         
         resources = resources or {}
         env_vars = env_vars or {}
+        mount_config = mount_config or {}
+        create_service = source_type != "image"
         
-        k8s_deployment_name = f"model-{model_id}-{deployment_name.lower().replace(' ', '-')}"
+        name_suffix = deployment_name.lower().replace(' ', '-')
+        k8s_deployment_name = f"model-{model_id}-{name_suffix}" if model_id > 0 else f"image-{name_suffix}"
         k8s_service_name = f"{k8s_deployment_name}-svc"
         
         # 确保namespace存在
@@ -112,10 +121,13 @@ class K8sService:
             # 创建Deployment
             deployment = self._create_deployment_object(
                 name=k8s_deployment_name,
+                source_type=source_type,
                 image_tag=image_tag,
                 replicas=replicas,
                 resources=resources,
                 env_vars=env_vars,
+                mount_config=mount_config,
+                command=command,
                 port=port
             )
             
@@ -152,50 +164,50 @@ class K8sService:
                 else:
                     raise
             
-            if progress_callback:
-                await progress_callback(50, "Creating service...")
-            
-            # 创建Service
-            service = self._create_service_object(
-                name=k8s_service_name,
-                selector={"app": k8s_deployment_name},
-                port=port
-            )
-            
-            try:
-                existing_svc = await loop.run_in_executor(
-                    None,
-                    lambda: self.core_api.read_namespaced_service(
-                        name=k8s_service_name,
-                        namespace=namespace
-                    )
+            if create_service:
+                if progress_callback:
+                    await progress_callback(50, "Creating service...")
+                
+                service = self._create_service_object(
+                    name=k8s_service_name,
+                    selector={"app": k8s_deployment_name},
+                    port=port
                 )
-                await loop.run_in_executor(
-                    None,
-                    lambda: self.core_api.replace_namespaced_service(
-                        name=k8s_service_name,
-                        namespace=namespace,
-                        body=service
+                
+                try:
+                    existing_svc = await loop.run_in_executor(
+                        None,
+                        lambda: self.core_api.read_namespaced_service(
+                            name=k8s_service_name,
+                            namespace=namespace
+                        )
                     )
-                )
-            except ApiException as e:
-                if e.status == 404:
                     await loop.run_in_executor(
                         None,
-                        lambda: self.core_api.create_namespaced_service(
+                        lambda: self.core_api.replace_namespaced_service(
+                            name=k8s_service_name,
                             namespace=namespace,
                             body=service
                         )
                     )
-                else:
-                    raise
+                except ApiException as e:
+                    if e.status == 404:
+                        await loop.run_in_executor(
+                            None,
+                            lambda: self.core_api.create_namespaced_service(
+                                namespace=namespace,
+                                body=service
+                            )
+                        )
+                    else:
+                        raise
             
             if progress_callback:
                 await progress_callback(80, "Waiting for rollout...")
             
             # 等待部署完成
             endpoint = await self._wait_for_deployment(
-                k8s_deployment_name, namespace, port
+                k8s_deployment_name, namespace, port, create_service=create_service
             )
             
             if progress_callback:
@@ -204,7 +216,7 @@ class K8sService:
             return {
                 "success": True,
                 "deployment_name": k8s_deployment_name,
-                "service_name": k8s_service_name,
+                "service_name": k8s_service_name if create_service else None,
                 "namespace": namespace,
                 "endpoint": endpoint,
                 "replicas": replicas
@@ -216,10 +228,13 @@ class K8sService:
     def _create_deployment_object(
         self,
         name: str,
+        source_type: str,
         image_tag: str,
         replicas: int,
         resources: Dict[str, Any],
         env_vars: Dict[str, str],
+        mount_config: Dict[str, Any],
+        command: Optional[str],
         port: int
     ) -> client.V1Deployment:
         
@@ -239,44 +254,104 @@ class K8sService:
         # 添加默认环境变量
         env.append(client.V1EnvVar(name="PORT", value=str(port)))
         env.append(client.V1EnvVar(name="MODEL_NAME", value=name))
+
+        volume_mounts = []
+        volumes = []
+        if mount_config.get("enabled"):
+            volume_name = "mounted-storage"
+            mount_path = mount_config["mount_path"]
+            read_only = bool(mount_config.get("read_only"))
+            sub_path = mount_config.get("sub_path") or None
+
+            volume_mounts.append(client.V1VolumeMount(
+                name=volume_name,
+                mount_path=mount_path,
+                read_only=read_only,
+                sub_path=sub_path
+            ))
+
+            if mount_config.get("type") == "pvc":
+                volumes.append(client.V1Volume(
+                    name=volume_name,
+                    persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
+                        claim_name=mount_config["claim_name"],
+                        read_only=read_only
+                    )
+                ))
+            elif mount_config.get("type") == "nfs":
+                volumes.append(client.V1Volume(
+                    name=volume_name,
+                    nfs=client.V1NFSVolumeSource(
+                        server=mount_config["server"],
+                        path=mount_config["path"],
+                        read_only=read_only
+                    )
+                ))
+
+        lifecycle = None
+        container_command = None
+        container_args = None
+        liveness_probe = client.V1Probe(
+            http_get=client.V1HTTPGetAction(
+                path="/health",
+                port=port
+            ),
+            initial_delay_seconds=0,
+            period_seconds=30,
+            timeout_seconds=10,
+            failure_threshold=20
+        )
+        readiness_probe = client.V1Probe(
+            http_get=client.V1HTTPGetAction(
+                path="/health",
+                port=port
+            ),
+            initial_delay_seconds=5,
+            period_seconds=10,
+            timeout_seconds=5,
+            failure_threshold=3
+        )
+        startup_probe = client.V1Probe(
+            http_get=client.V1HTTPGetAction(
+                path="/health",
+                port=port
+            ),
+            initial_delay_seconds=10,
+            period_seconds=10,
+            timeout_seconds=5,
+            failure_threshold=60
+        )
+
+        if source_type == "image":
+            # Keep generic image deployments alive even when the image has no long-running foreground process.
+            container_command = ["/bin/sh", "-c"]
+            container_args = ["while true; do sleep 3600; done"]
+            liveness_probe = None
+            readiness_probe = None
+            startup_probe = None
+        elif command and command.strip():
+            lifecycle = client.V1Lifecycle(
+                post_start=client.V1LifecycleHandler(
+                    _exec=client.V1ExecAction(
+                        command=["/bin/sh", "-lc", command.strip()]
+                    )
+                )
+            )
         
         container = client.V1Container(
             name="model",
             image=image_tag,
             image_pull_policy="Never" if image_tag.startswith("ai-model:") else "IfNotPresent",
-            ports=[client.V1ContainerPort(container_port=port)],
+            command=container_command,
+            args=container_args,
+            ports=None if source_type == "image" else [client.V1ContainerPort(container_port=port)],
             resources=resource_requirements,
             env=env,
-            liveness_probe=client.V1Probe(
-                http_get=client.V1HTTPGetAction(
-                    path="/health",
-                    port=port
-                ),
-                initial_delay_seconds=0,
-                period_seconds=30,
-                timeout_seconds=10,
-                failure_threshold=20
-            ),
-            readiness_probe=client.V1Probe(
-                http_get=client.V1HTTPGetAction(
-                    path="/health",
-                    port=port
-                ),
-                initial_delay_seconds=5,
-                period_seconds=10,
-                timeout_seconds=5,
-                failure_threshold=3
-            ),
-            startup_probe=client.V1Probe(
-                http_get=client.V1HTTPGetAction(
-                    path="/health",
-                    port=port
-                ),
-                initial_delay_seconds=10,
-                period_seconds=10,
-                timeout_seconds=5,
-                failure_threshold=60
-            )
+            volume_mounts=volume_mounts or None,
+            lifecycle=lifecycle,
+            liveness_probe=liveness_probe,
+            readiness_probe=readiness_probe,
+            startup_probe=startup_probe
         )
         
         image_pull_secrets = None
@@ -289,6 +364,7 @@ class K8sService:
             metadata=client.V1ObjectMeta(labels={"app": name}),
             spec=client.V1PodSpec(
                 containers=[container],
+                volumes=volumes or None,
                 image_pull_secrets=image_pull_secrets
             )
         )
@@ -362,12 +438,14 @@ class K8sService:
         name: str,
         namespace: str,
         port: int,
+        create_service: bool = True,
         timeout: int = 300
     ) -> str:
         import time
         start_time = time.time()
 
         loop = asyncio.get_event_loop()
+        last_error = None
 
         while time.time() - start_time < timeout:
             try:
@@ -379,7 +457,29 @@ class K8sService:
                     )
                 )
 
+                pods = await loop.run_in_executor(
+                    None,
+                    lambda: self.core_api.list_namespaced_pod(
+                        namespace=namespace,
+                        label_selector=f"app={name}"
+                    )
+                )
+
+                if pods.items and pods.items[0].status.container_statuses:
+                    container = pods.items[0].status.container_statuses[0]
+                    if container.state.waiting:
+                        waiting_reason = container.state.waiting.reason or "Waiting"
+                        waiting_message = container.state.waiting.message or ""
+                        if waiting_reason in {"ImagePullBackOff", "ErrImagePull", "CrashLoopBackOff", "CreateContainerConfigError", "CreateContainerError"}:
+                            raise Exception(f"Pod failed: {waiting_reason} - {waiting_message}" if waiting_message else f"Pod failed: {waiting_reason}")
+                    elif container.state.terminated:
+                        terminated_reason = container.state.terminated.reason or "Terminated"
+                        terminated_message = container.state.terminated.message or ""
+                        raise Exception(f"Pod terminated: {terminated_reason} - {terminated_message}" if terminated_message else f"Pod terminated: {terminated_reason}")
+
                 if deployment.status.ready_replicas == deployment.spec.replicas:
+                    if not create_service:
+                        return ""
                     # 获取service信息
                     service = await loop.run_in_executor(
                         None,
@@ -414,12 +514,25 @@ class K8sService:
                     # 如果找不到工作节点，返回 service 信息
                     return f"NodePort service created, port: {node_port}"
 
-            except:
-                pass
+            except Exception as exc:
+                last_error = exc
+                error_text = str(exc)
+                if any(keyword in error_text for keyword in [
+                    "Pod failed:",
+                    "Pod terminated:",
+                    "CreateContainerConfigError",
+                    "CreateContainerError",
+                    "ImagePullBackOff",
+                    "ErrImagePull",
+                    "CrashLoopBackOff"
+                ]):
+                    raise
 
             await asyncio.sleep(5)
 
-        return f"Deployment ready, check NodePort service for access"
+        if last_error:
+            raise Exception(f"Deployment rollout timed out after {timeout}s: {last_error}")
+        raise Exception(f"Deployment rollout timed out after {timeout}s")
     
     async def get_deployment_status(
         self,
@@ -659,6 +772,265 @@ class K8sService:
             return logs
         except Exception as e:
             return f"Failed to get logs: {str(e)}"
+
+    async def get_ready_pod_name(self, deployment_name: str, namespace: str = "default") -> str:
+        if not self.is_connected:
+            raise Exception("Kubernetes is not connected")
+
+        loop = asyncio.get_event_loop()
+        pods = await loop.run_in_executor(
+            None,
+            lambda: self.core_api.list_namespaced_pod(
+                namespace=namespace,
+                label_selector=f"app={deployment_name}"
+            )
+        )
+
+        for pod in pods.items:
+            phase = pod.status.phase
+            conditions = {condition.type: condition.status for condition in (pod.status.conditions or [])}
+            if phase == "Running" and conditions.get("Ready") == "True":
+                return pod.metadata.name
+
+        raise Exception("No ready pod found for deployment")
+
+    def _exec_in_pod_sync(self, pod_name: str, namespace: str, shell_command: str) -> Dict[str, Any]:
+        wrapped_command = (
+            "STDOUT_FILE=$(mktemp)\n"
+            "STDERR_FILE=$(mktemp)\n"
+            "(\n"
+            f"{shell_command}\n"
+            ") >\"$STDOUT_FILE\" 2>\"$STDERR_FILE\" &\n"
+            "CMD_PID=$!\n"
+            "while kill -0 \"$CMD_PID\" 2>/dev/null; do\n"
+            "  printf '__CMD_KEEPALIVE__\\n'\n"
+            "  sleep 10\n"
+            "done\n"
+            "wait \"$CMD_PID\"\n"
+            "exit_code=$?\n"
+            "printf '__CMD_STDOUT_BEGIN__\\n'\n"
+            "cat \"$STDOUT_FILE\"\n"
+            "printf '\\n__CMD_STDOUT_END__\\n__CMD_STDERR_BEGIN__\\n'\n"
+            "cat \"$STDERR_FILE\"\n"
+            "printf '\\n__CMD_STDERR_END__\\n__CMD_EXIT_CODE__=%s\\n' \"$exit_code\"\n"
+            "rm -f \"$STDOUT_FILE\" \"$STDERR_FILE\"\n"
+        )
+        response = stream(
+            self.core_api.connect_get_namespaced_pod_exec,
+            pod_name,
+            namespace,
+            command=["/bin/sh", "-lc", wrapped_command],
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False,
+            _preload_content=True
+        )
+
+        payload = response if isinstance(response, str) else str(response or "")
+        stdout = ""
+        stderr = ""
+        exit_code = 1
+
+        stdout_marker_start = "__CMD_STDOUT_BEGIN__\n"
+        stdout_marker_end = "\n__CMD_STDOUT_END__\n"
+        stderr_marker_start = "__CMD_STDERR_BEGIN__\n"
+        stderr_marker_end = "\n__CMD_STDERR_END__\n"
+        exit_marker = "__CMD_EXIT_CODE__="
+
+        if stdout_marker_start in payload and stdout_marker_end in payload:
+            stdout = payload.split(stdout_marker_start, 1)[1].split(stdout_marker_end, 1)[0]
+        if stderr_marker_start in payload and stderr_marker_end in payload:
+            stderr = payload.split(stderr_marker_start, 1)[1].split(stderr_marker_end, 1)[0]
+        if exit_marker in payload:
+            try:
+                exit_code = int(payload.rsplit(exit_marker, 1)[1].strip().splitlines()[0])
+            except Exception:
+                exit_code = 1
+        elif payload.strip():
+            stderr = payload.strip()
+        return {
+            "stdout": stdout.strip(),
+            "stderr": stderr.strip(),
+            "exit_code": exit_code
+        }
+
+    def _clean_stream_chunk(self, chunk: str, marker: str) -> str:
+        if not chunk:
+            return ""
+        return chunk.replace(f"{marker}\n", "").replace(marker, "")
+
+    async def exec_in_pod(self, pod_name: str, namespace: str, shell_command: str) -> Dict[str, Any]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self._exec_in_pod_sync(pod_name, namespace, shell_command)
+        )
+
+    def _exec_in_pod_streaming_sync(
+        self,
+        pod_name: str,
+        namespace: str,
+        shell_command: str,
+        on_log: Optional[Callable[[str], None]] = None
+    ) -> Dict[str, Any]:
+        heartbeat_marker = "__CMD_KEEPALIVE__"
+        exit_marker = "__CMD_EXIT_CODE__="
+        wrapped_command = (
+            "(\n"
+            "  while true; do\n"
+            f"    printf '{heartbeat_marker}\\n' >&2\n"
+            "    sleep 10\n"
+            "  done\n"
+            ") &\n"
+            "HEARTBEAT_PID=$!\n"
+            f"{shell_command}\n"
+            "exit_code=$?\n"
+            "kill \"$HEARTBEAT_PID\" >/dev/null 2>&1 || true\n"
+            "wait \"$HEARTBEAT_PID\" 2>/dev/null || true\n"
+            f"printf '\\n{exit_marker}%s\\n' \"$exit_code\"\n"
+        )
+        response = stream(
+            self.core_api.connect_get_namespaced_pod_exec,
+            pod_name,
+            namespace,
+            command=["/bin/sh", "-lc", wrapped_command],
+            stderr=True,
+            stdin=False,
+            stdout=True,
+            tty=False,
+            _preload_content=False
+        )
+
+        stdout_chunks: List[str] = []
+        stderr_chunks: List[str] = []
+        try:
+            while response.is_open():
+                response.update(timeout=1)
+                if response.peek_stdout():
+                    chunk = response.read_stdout()
+                    if chunk:
+                        stdout_chunks.append(chunk)
+                        clean_chunk = chunk.split(exit_marker, 1)[0] if exit_marker in chunk else chunk
+                        if clean_chunk and on_log:
+                            on_log(clean_chunk)
+                if response.peek_stderr():
+                    chunk = response.read_stderr()
+                    if chunk:
+                        clean_chunk = self._clean_stream_chunk(chunk, heartbeat_marker)
+                        if clean_chunk:
+                            stderr_chunks.append(clean_chunk)
+                            if on_log:
+                                on_log(clean_chunk)
+            response.close()
+        except Exception as exc:
+            response.close()
+            joined_stdout = "".join(stdout_chunks)
+            if exit_marker not in joined_stdout:
+                raise exc
+
+        stdout = "".join(stdout_chunks)
+        stderr = "".join(stderr_chunks)
+        exit_code = 1
+        if exit_marker in stdout:
+            stdout, _, tail = stdout.rpartition(exit_marker)
+            try:
+                exit_code = int(tail.strip().splitlines()[0])
+            except Exception:
+                exit_code = 1
+
+        return {
+            "stdout": stdout.strip(),
+            "stderr": stderr.strip(),
+            "exit_code": exit_code
+        }
+
+    async def exec_in_pod_streaming(
+        self,
+        pod_name: str,
+        namespace: str,
+        shell_command: str,
+        on_log: Optional[Callable[[str], None]] = None
+    ) -> Dict[str, Any]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            lambda: self._exec_in_pod_streaming_sync(pod_name, namespace, shell_command, on_log=on_log)
+        )
+
+    async def list_container_files(
+        self,
+        pod_name: str,
+        namespace: str,
+        result_path: str,
+        allow_missing: bool = False
+    ) -> List[Dict[str, Any]]:
+        root_quoted = shlex.quote(result_path)
+        missing_dir_command = "exit 0" if allow_missing else 'echo "Result directory not found: $ROOT" >&2; exit 11'
+        command = (
+            f"ROOT={root_quoted}; "
+            f'if [ ! -d "$ROOT" ]; then {missing_dir_command}; fi; '
+            'find "$ROOT" -type f -exec sh -c \'for f do rel="${f#"$1"/}"; size=$(wc -c < "$f" | tr -d " "); '
+            'mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0); '
+            'printf "%s\\t%s\\t%s\\n" "$rel" "$size" "$mtime"; done\' sh "$ROOT" {} +'
+        )
+        result = await self.exec_in_pod(pod_name, namespace, command)
+        if result["exit_code"] != 0:
+            raise Exception(result["stderr"] or "Failed to list container result files")
+
+        from app.services.inference_service import build_file_entry
+
+        files = []
+        for line in result["stdout"].splitlines():
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            relative_path = parts[0]
+            size = parts[1]
+            mtime = parts[2] if len(parts) > 2 else "0"
+            if not relative_path:
+                continue
+            try:
+                files.append(build_file_entry(
+                    relative_path.strip(),
+                    int(size.strip() or "0"),
+                    int(mtime.strip() or "0")
+                ))
+            except ValueError:
+                continue
+        return sorted(files, key=lambda item: item["relative_path"])
+
+    async def read_container_file_bytes(self, pod_name: str, namespace: str, file_path: str) -> bytes:
+        file_quoted = shlex.quote(file_path)
+        command = (
+            f'FILE={file_quoted}; '
+            'if [ ! -f "$FILE" ]; then echo "Result file not found: $FILE" >&2; exit 12; fi; '
+            'base64 "$FILE" | tr -d "\\n"'
+        )
+        result = await self.exec_in_pod(pod_name, namespace, command)
+        if result["exit_code"] != 0:
+            raise Exception(result["stderr"] or "Failed to read container file")
+        return base64.b64decode(result["stdout"].encode("ascii"))
+
+    async def read_container_text_file(
+        self,
+        pod_name: str,
+        namespace: str,
+        file_path: str,
+        max_bytes: int = 1024 * 1024
+    ) -> str:
+        file_quoted = shlex.quote(file_path)
+        command = (
+            f'FILE={file_quoted}; '
+            'if [ ! -f "$FILE" ]; then echo "Result file not found: $FILE" >&2; exit 12; fi; '
+            f'head -c {max_bytes} "$FILE"'
+        )
+        result = await self.exec_in_pod(pod_name, namespace, command)
+        if result["exit_code"] != 0:
+            raise Exception(result["stderr"] or "Failed to read container text file")
+        return result["stdout"]
     
     async def get_worker_nodes(self) -> List[Dict[str, Any]]:
         """获取所有工作节点（role=worker）"""

@@ -1,15 +1,142 @@
+import asyncio
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse, PlainTextResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from typing import Optional, Dict, Any
+from urllib.parse import urlparse
 
 from app.models.database import get_db, AIModel, Deployment, DeployStatus, ModelStatus, async_session_maker
 from app.models.schemas import (
-    DeploymentCreate, DeploymentUpdate, DeploymentResponse, DeploymentList, TaskStatus
+    DeploymentCreate, DeploymentUpdate, DeploymentResponse, DeploymentList, TaskStatus, InferenceRunRequest
 )
 from app.services.k8s_service import k8s_service
+from app.services.nfs_service import NFSDiscoveryError, discover_nfs_config
+from app.core.config import settings
+from app.services.inference_service import (
+    build_empty_inference_result,
+    build_result_digest,
+    find_result_file,
+    get_media_type,
+    merge_inference_result,
+    normalize_inference_config,
+    parse_template_variables,
+    render_command_template,
+    resolve_mount_file_path,
+    resolve_mount_result_root,
+    scan_mount_result_files,
+    select_generated_files,
+)
 
 router = APIRouter(prefix="/deployments", tags=["deployments"])
+ACTIVE_INFERENCE_TASKS = set()
+
+
+def _has_active_inference_task(deployment_id: int) -> bool:
+    if deployment_id not in ACTIVE_INFERENCE_TASKS:
+        return False
+
+    from app.core.websocket import manager
+
+    latest = manager.latest_progress.get(f"infer-{deployment_id}")
+    if not latest:
+        ACTIVE_INFERENCE_TASKS.discard(deployment_id)
+        return False
+
+    progress = int(latest.get("progress") or 0)
+    has_error = bool((latest.get("data") or {}).get("error"))
+    if progress >= 100 or has_error:
+        ACTIVE_INFERENCE_TASKS.discard(deployment_id)
+        return False
+
+    return True
+
+
+def serialize_deployment(deployment: Deployment) -> Dict[str, Any]:
+    return {
+        "id": deployment.id,
+        "name": deployment.name,
+        "model_id": deployment.model_id,
+        "source_type": deployment.source_type or "model",
+        "image": deployment.image,
+        "port": deployment.port or 8000,
+        "namespace": deployment.namespace,
+        "replicas": deployment.replicas,
+        "resources": deployment.resources or {},
+        "env_vars": deployment.env_vars or {},
+        "mount_config": deployment.mount_config or {},
+        "command": deployment.command,
+        "inference_config": normalize_inference_config(deployment.source_type, deployment.inference_config),
+        "last_inference_result": deployment.last_inference_result or build_empty_inference_result(),
+        "status": deployment.status.value if hasattr(deployment.status, "value") else deployment.status,
+        "status_message": deployment.status_message,
+        "k8s_deployment_name": deployment.k8s_deployment_name,
+        "k8s_service_name": deployment.k8s_service_name,
+        "endpoint": deployment.endpoint,
+        "created_at": deployment.created_at,
+        "updated_at": deployment.updated_at,
+    }
+
+
+def normalize_registry_image(image: str) -> str:
+    image = (image or "").strip()
+    if not image:
+        return image
+
+    first_segment = image.split("/", 1)[0]
+    if "." in first_segment or ":" in first_segment or first_segment == "localhost":
+        return image
+
+    registry_url = settings.DOCKER_REGISTRY_URL.rstrip("/")
+    parsed = urlparse(f"http://{registry_url}")
+    registry_host = parsed.netloc
+    if not registry_host:
+        return image
+    return f"{registry_host}/{image}"
+
+
+def normalize_mount_config(mount_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    config = dict(mount_config or {})
+    mount_type = (config.get("type") or "").strip().lower()
+    enabled = bool(config.get("enabled")) and bool(mount_type)
+
+    if not enabled:
+        return {}
+
+    mount_path = (config.get("mount_path") or "").strip()
+    if not mount_path:
+        raise HTTPException(status_code=400, detail="Mount path is required")
+
+    normalized = {
+        "enabled": True,
+        "type": mount_type,
+        "mount_path": mount_path,
+        "sub_path": (config.get("sub_path") or "").strip() or None,
+        "read_only": bool(config.get("read_only"))
+    }
+
+    if mount_type == "pvc":
+        claim_name = (config.get("claim_name") or "").strip()
+        if not claim_name:
+            raise HTTPException(status_code=400, detail="PVC claim name is required")
+        normalized["claim_name"] = claim_name
+    elif mount_type == "nfs":
+        directory = (config.get("directory") or "").strip().strip("/")
+        if not directory:
+            raise HTTPException(status_code=400, detail="NFS directory is required")
+        try:
+            nfs_config = discover_nfs_config()
+        except NFSDiscoveryError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        export_root = nfs_config["export_root"].rstrip("/")
+        normalized["server"] = nfs_config["server"]
+        normalized["directory"] = directory
+        normalized["path"] = f"{export_root}/{directory}" if directory else export_root
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported mount type")
+
+    return normalized
 
 
 @router.post("", response_model=DeploymentResponse)
@@ -18,30 +145,59 @@ async def create_deployment(
     db: AsyncSession = Depends(get_db)
 ):
     """创建新的部署"""
-    # 检查模型是否存在且已就绪
-    result = await db.execute(select(AIModel).where(AIModel.id == deployment.model_id))
-    model = result.scalar_one_or_none()
-    
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
-    
-    if model.status != ModelStatus.READY:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Model is not ready. Current status: {model.status.value}"
-        )
-    
-    if not model.docker_image or not model.docker_image_tag:
-        raise HTTPException(status_code=400, detail="Model has no Docker image")
+    source_type = (deployment.source_type or "model").strip().lower()
+    model = None
+    model_id = 0
+    image = deployment.image.strip() if deployment.image else None
+    port = deployment.port
+    mount_config = normalize_mount_config(deployment.mount_config)
+    inference_config = normalize_inference_config(source_type, deployment.inference_config)
+
+    if source_type == "model":
+        if not deployment.model_id:
+            raise HTTPException(status_code=400, detail="Model is required")
+
+        result = await db.execute(select(AIModel).where(AIModel.id == deployment.model_id))
+        model = result.scalar_one_or_none()
+
+        if not model:
+            raise HTTPException(status_code=404, detail="Model not found")
+
+        if model.status != ModelStatus.READY:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Model is not ready. Current status: {model.status.value}"
+            )
+
+        if not model.docker_image or not model.docker_image_tag:
+            raise HTTPException(status_code=400, detail="Model has no Docker image")
+
+        model_id = model.id
+        image = f"{model.docker_image}:{model.docker_image_tag}"
+        port = model.config.get("port", deployment.port) if model.config else deployment.port
+    elif source_type == "image":
+        if not image:
+            raise HTTPException(status_code=400, detail="Image is required")
+        image = normalize_registry_image(image)
+        port = 8000
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported deployment source type")
     
     # 创建部署记录
     db_deployment = Deployment(
         name=deployment.name,
-        model_id=deployment.model_id,
+        model_id=model_id,
+        source_type=source_type,
+        image=image,
+        port=port,
         namespace=deployment.namespace,
         replicas=deployment.replicas,
         resources=deployment.resources,
         env_vars=deployment.env_vars,
+        mount_config=mount_config,
+        command=None,
+        inference_config=inference_config,
+        last_inference_result=build_empty_inference_result(),
         status=DeployStatus.PENDING
     )
     
@@ -49,7 +205,7 @@ async def create_deployment(
     await db.commit()
     await db.refresh(db_deployment)
     
-    return db_deployment
+    return serialize_deployment(db_deployment)
 
 
 @router.post("/{deployment_id}/deploy", response_model=TaskStatus)
@@ -67,11 +223,22 @@ async def deploy_to_k8s(
         raise HTTPException(status_code=404, detail="Deployment not found")
     
     # 再获取关联的模型
-    result = await db.execute(select(AIModel).where(AIModel.id == deployment.model_id))
-    model = result.scalar_one_or_none()
-    
-    if not model:
-        raise HTTPException(status_code=404, detail="Model not found")
+    model = None
+    image_tag = normalize_registry_image(deployment.image) if deployment.image else None
+    port = deployment.port or 8000
+
+    if deployment.source_type == "model":
+        result = await db.execute(select(AIModel).where(AIModel.id == deployment.model_id))
+        model = result.scalar_one_or_none()
+        
+        if not model:
+            raise HTTPException(status_code=404, detail="Model not found")
+
+        image_tag = f"{model.docker_image}:{model.docker_image_tag}"
+        port = model.config.get("port", deployment.port or 8000) if model.config else (deployment.port or 8000)
+
+    if not image_tag:
+        raise HTTPException(status_code=400, detail="Deployment has no image")
     
     if not k8s_service.is_connected:
         raise HTTPException(status_code=503, detail="Kubernetes service not available")
@@ -91,12 +258,15 @@ async def deploy_to_k8s(
         deployment_id=deployment_id,
         deployment_name=deployment.name,
         model_id=deployment.model_id,
-        image_tag=f"{model.docker_image}:{model.docker_image_tag}",
+        source_type=deployment.source_type,
+        image_tag=image_tag,
         namespace=deployment.namespace,
         replicas=deployment.replicas,
         resources=deployment.resources,
         env_vars=deployment.env_vars,
-        port=model.config.get("port", 8000) if model.config else 8000
+        mount_config=deployment.mount_config,
+        command=None,
+        port=port
     )
     
     return TaskStatus(
@@ -112,11 +282,14 @@ async def run_deploy_task(
     deployment_id: int,
     deployment_name: str,
     model_id: int,
+    source_type: str,
     image_tag: str,
     namespace: str,
     replicas: int,
     resources: Dict[str, Any],
     env_vars: Dict[str, str],
+    mount_config: Dict[str, Any],
+    command: Optional[str],
     port: int
 ):
     """后台执行部署任务"""
@@ -145,11 +318,14 @@ async def run_deploy_task(
             deploy_result = await k8s_service.deploy_model(
                 deployment_name=deployment_name,
                 model_id=model_id,
+                source_type=source_type,
                 image_tag=image_tag,
                 namespace=namespace,
                 replicas=replicas,
                 resources=resources,
                 env_vars=env_vars,
+                mount_config=mount_config,
+                command=None,
                 port=port,
                 progress_callback=progress_callback
             )
@@ -206,7 +382,7 @@ async def list_deployments(
     result = await db.execute(query)
     deployments = result.scalars().all()
     
-    return DeploymentList(total=total, items=list(deployments))
+    return DeploymentList(total=total, items=[serialize_deployment(deployment) for deployment in deployments])
 
 
 @router.get("/{deployment_id}", response_model=DeploymentResponse)
@@ -218,7 +394,263 @@ async def get_deployment(deployment_id: int, db: AsyncSession = Depends(get_db))
     if not deployment:
         raise HTTPException(status_code=404, detail="Deployment not found")
     
-    return deployment
+    return serialize_deployment(deployment)
+
+
+def _get_deployment_inference_config(deployment: Deployment) -> Dict[str, Any]:
+    config = normalize_inference_config(deployment.source_type, deployment.inference_config)
+    if not config.get("enabled"):
+        raise HTTPException(status_code=400, detail="Inference command is not configured for this deployment")
+    return config
+
+
+async def _list_result_files_for_deployment(
+    deployment: Deployment,
+    inference_config: Dict[str, Any],
+    pod_name: Optional[str] = None
+) -> Dict[str, Any]:
+    result_source = inference_config.get("result_source", "container")
+    result_path = inference_config.get("result_path", "")
+
+    if result_source == "mount":
+        mount_root = resolve_mount_result_root(deployment.mount_config or {}, inference_config)
+        return {
+            "files": scan_mount_result_files(mount_root),
+            "mount_root": mount_root
+        }
+
+    if not pod_name:
+        pod_name = await k8s_service.get_ready_pod_name(deployment.k8s_deployment_name, deployment.namespace)
+    files = await k8s_service.list_container_files(pod_name, deployment.namespace, result_path)
+    return {
+        "files": files,
+        "pod_name": pod_name
+    }
+
+
+@router.post("/{deployment_id}/run-inference", response_model=TaskStatus)
+async def run_inference(
+    deployment_id: int,
+    request: InferenceRunRequest,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+    if deployment.source_type != "image":
+        raise HTTPException(status_code=400, detail="Inference command is only available for image deployments")
+    if not deployment.k8s_deployment_name:
+        raise HTTPException(status_code=400, detail="Deployment has not been deployed to Kubernetes")
+    if _has_active_inference_task(deployment_id):
+        raise HTTPException(status_code=409, detail="Inference task is already running for this deployment")
+
+    inference_config = _get_deployment_inference_config(deployment)
+    command_template = inference_config["command_template"]
+    variable_names = inference_config.get("variable_names") or parse_template_variables(command_template)
+    final_command = render_command_template(command_template, request.variables, variable_names)
+    task_id = f"infer-{deployment_id}"
+
+    ACTIVE_INFERENCE_TASKS.add(deployment_id)
+    background_tasks.add_task(
+        run_inference_task,
+        task_id=task_id,
+        deployment_id=deployment_id,
+        variables=request.variables,
+        final_command=final_command
+    )
+    return TaskStatus(
+        task_id=task_id,
+        status="running",
+        progress=0,
+        message="Inference task started, please check progress via WebSocket"
+    )
+
+
+async def run_inference_task(task_id: str, deployment_id: int, variables: Dict[str, str], final_command: str):
+    from app.core.websocket import manager
+
+    async with async_session_maker() as db:
+        deployment = None
+        started_at = datetime.utcnow().isoformat()
+        loop = asyncio.get_running_loop()
+        try:
+            result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+            deployment = result.scalar_one_or_none()
+            if not deployment:
+                await manager.send_progress(task_id, 0, "Deployment not found", {"error": True})
+                return
+
+            inference_config = _get_deployment_inference_config(deployment)
+
+            await manager.send_progress(task_id, 10, "Selecting ready pod...")
+            pod_name = await k8s_service.get_ready_pod_name(deployment.k8s_deployment_name, deployment.namespace)
+            before_files = await k8s_service.list_container_files(
+                pod_name,
+                deployment.namespace,
+                inference_config["result_path"],
+                allow_missing=True
+            )
+
+            await manager.send_progress(task_id, 40, "Running inference command...")
+            def on_log(chunk: str):
+                asyncio.run_coroutine_threadsafe(
+                    manager.send_progress(
+                        task_id,
+                        40,
+                        "Running inference command...",
+                        {"log": chunk}
+                    ),
+                    loop
+                )
+
+            execution = await k8s_service.exec_in_pod_streaming(
+                pod_name,
+                deployment.namespace,
+                final_command,
+                on_log=on_log
+            )
+
+            await manager.send_progress(task_id, 75, "Collecting result files...")
+            files_payload = await _list_result_files_for_deployment(deployment, inference_config, pod_name=pod_name)
+            result_files = select_generated_files(before_files, files_payload["files"])
+
+            latest_result = {
+                "started_at": started_at,
+                "finished_at": datetime.utcnow().isoformat(),
+                "exit_code": execution["exit_code"],
+                "stdout": execution["stdout"],
+                "stderr": execution["stderr"],
+                "files": result_files,
+                "result_source": inference_config["result_source"],
+                "result_path": inference_config["result_path"],
+                "result_digest": build_result_digest(
+                    inference_config["command_template"],
+                    variables,
+                    inference_config["result_path"]
+                )
+            }
+            deployment.last_inference_result = merge_inference_result(deployment.last_inference_result or {}, latest_result)
+            await db.commit()
+
+            if execution["exit_code"] != 0:
+                await manager.send_progress(
+                    task_id,
+                    100,
+                    "Inference finished with errors",
+                    {"error": True, "exit_code": execution["exit_code"], "files": result_files}
+                )
+                return
+
+            await manager.send_progress(
+                task_id,
+                100,
+                "Inference completed successfully",
+                {"exit_code": 0, "files": result_files}
+            )
+        except HTTPException as exc:
+            if deployment:
+                failure_result = merge_inference_result(deployment.last_inference_result or {}, {
+                    "started_at": started_at,
+                    "finished_at": datetime.utcnow().isoformat(),
+                    "exit_code": 1,
+                    "stdout": "",
+                    "stderr": exc.detail,
+                    "files": []
+                })
+                deployment.last_inference_result = failure_result
+                await db.commit()
+            await manager.send_progress(task_id, 0, exc.detail, {"error": True})
+        except Exception as exc:
+            if deployment:
+                failure_result = merge_inference_result(deployment.last_inference_result or {}, {
+                    "started_at": started_at,
+                    "finished_at": datetime.utcnow().isoformat(),
+                    "exit_code": 1,
+                    "stdout": "",
+                    "stderr": str(exc),
+                    "files": []
+                })
+                deployment.last_inference_result = failure_result
+                await db.commit()
+            await manager.send_progress(task_id, 0, f"Inference failed: {str(exc)}", {"error": True})
+        finally:
+            ACTIVE_INFERENCE_TASKS.discard(deployment_id)
+
+
+@router.get("/{deployment_id}/inference-result")
+async def get_inference_result(deployment_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+
+    return deployment.last_inference_result or build_empty_inference_result()
+
+
+@router.get("/{deployment_id}/inference-files/{file_key}/preview")
+async def preview_inference_file(deployment_id: int, file_key: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+
+    inference_config = _get_deployment_inference_config(deployment)
+    result_data = deployment.last_inference_result or build_empty_inference_result()
+    file_info = find_result_file(result_data.get("files", []), file_key)
+    if not file_info.get("previewable"):
+        raise HTTPException(status_code=400, detail="This file type does not support preview")
+
+    result_path = inference_config["result_path"].rstrip("/")
+    if inference_config.get("result_source") == "mount":
+        mount_root = resolve_mount_result_root(deployment.mount_config or {}, inference_config)
+        file_path = resolve_mount_file_path(mount_root, file_info["relative_path"])
+        if file_info["kind"] == "text":
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+                return PlainTextResponse(f.read())
+        return FileResponse(file_path, media_type=get_media_type(file_info["name"]))
+
+    pod_name = await k8s_service.get_ready_pod_name(deployment.k8s_deployment_name, deployment.namespace)
+    container_file_path = f"{result_path}/{file_info['relative_path']}".replace("//", "/")
+    if file_info["kind"] == "text":
+        content = await k8s_service.read_container_text_file(pod_name, deployment.namespace, container_file_path)
+        return PlainTextResponse(content)
+
+    content = await k8s_service.read_container_file_bytes(pod_name, deployment.namespace, container_file_path)
+    return Response(content=content, media_type=get_media_type(file_info["name"]))
+
+
+@router.get("/{deployment_id}/inference-files/{file_key}/download")
+async def download_inference_file(deployment_id: int, file_key: str, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+
+    inference_config = _get_deployment_inference_config(deployment)
+    result_data = deployment.last_inference_result or build_empty_inference_result()
+    file_info = find_result_file(result_data.get("files", []), file_key)
+    result_path = inference_config["result_path"].rstrip("/")
+
+    if inference_config.get("result_source") == "mount":
+        mount_root = resolve_mount_result_root(deployment.mount_config or {}, inference_config)
+        file_path = resolve_mount_file_path(mount_root, file_info["relative_path"])
+        return FileResponse(
+            file_path,
+            media_type=get_media_type(file_info["name"]),
+            filename=file_info["name"]
+        )
+
+    pod_name = await k8s_service.get_ready_pod_name(deployment.k8s_deployment_name, deployment.namespace)
+    container_file_path = f"{result_path}/{file_info['relative_path']}".replace("//", "/")
+    content = await k8s_service.read_container_file_bytes(pod_name, deployment.namespace, container_file_path)
+    headers = {"Content-Disposition": f'attachment; filename="{file_info["name"]}"'}
+    return Response(content=content, media_type=get_media_type(file_info["name"]), headers=headers)
 
 
 @router.get("/{deployment_id}/status")

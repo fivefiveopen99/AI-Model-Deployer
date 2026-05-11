@@ -5,9 +5,13 @@
         <div class="card-header">
           <span>部署管理</span>
           <div class="header-actions">
-            <el-button type="primary" @click="showCreateDialog">
+            <el-button type="primary" @click="showCreateDialog('model')">
               <el-icon><Plus /></el-icon>
-              创建部署
+              部署模型
+            </el-button>
+            <el-button type="success" @click="showCreateDialog('image')">
+              <el-icon><Plus /></el-icon>
+              部署镜像
             </el-button>
             <el-button @click="refreshDeployments">
               <el-icon><Refresh /></el-icon>
@@ -20,6 +24,13 @@
       <el-table :data="deploymentsStore.deployments" v-loading="deploymentsStore.loading" stripe>
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="部署名称" />
+        <el-table-column prop="source_type" label="来源" width="100">
+          <template #default="{ row }">
+            <el-tag :type="row.source_type === 'image' ? 'success' : 'primary'">
+              {{ row.source_type === 'image' ? '镜像' : '模型' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="namespace" label="命名空间" width="120">
           <template #default="{ row }">
             <el-tag type="info">{{ row.namespace }}</el-tag>
@@ -48,13 +59,22 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="{ row }">
             <el-button-group>
               <el-button size="small" @click="viewDetail(row)">详情</el-button>
-              <el-button 
-                size="small" 
-                type="success" 
+              <el-button
+                v-if="shouldShowInferenceAction(row)"
+                size="small"
+                type="warning"
+                @click="goToInference(row)"
+              >
+                推理
+              </el-button>
+              <el-button
+                v-if="shouldShowDeployAction(row)"
+                size="small"
+                type="success"
                 @click="deployToK8s(row)"
                 :disabled="row.status === 'running' || row.status === 'deploying'"
               >
@@ -113,12 +133,12 @@
     </el-dialog>
 
     <!-- 创建部署对话框 -->
-    <el-dialog v-model="createDialogVisible" title="创建部署" width="720px">
+    <el-dialog v-model="createDialogVisible" :title="createMode === 'image' ? '部署镜像' : '部署模型'" width="720px">
       <el-form :model="form" :rules="rules" ref="formRef" label-width="100px">
         <el-form-item label="部署名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入部署名称" />
         </el-form-item>
-        <el-form-item label="选择模型" prop="model_id">
+        <el-form-item v-if="createMode === 'model'" label="选择模型" prop="model_id">
           <el-select v-model="form.model_id" placeholder="请选择模型" style="width: 100%">
             <el-option
               v-for="model in readyModels"
@@ -127,6 +147,48 @@
               :value="model.id"
             />
           </el-select>
+        </el-form-item>
+        <el-form-item v-else label="选择镜像" prop="image">
+          <el-select
+            v-model="form.image"
+            placeholder="请选择私有仓库镜像"
+            filterable
+            style="width: 100%"
+          >
+            <el-option
+              v-for="image in registryImageOptions"
+              :key="image.image_ref"
+              :label="image.image_ref"
+              :value="image.image_ref"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item v-if="createMode === 'image'" label="推理配置">
+          <div class="mount-panel">
+            <div class="mount-grid">
+              <div class="resource-field inference-full-width">
+                <label>推理命令模板</label>
+                <el-input
+                  v-model="inferenceConfig.command_template"
+                  type="textarea"
+                  :rows="4"
+                  placeholder="如：python test_lora_sd.py --model_dir {{model_dir}} --position {{position}}"
+                />
+                <div class="form-tip">使用 <code v-pre>{{variable_name}}</code> 定义可变参数，详情页运行前填写变量值。</div>
+              </div>
+              <div class="resource-field">
+                <label>结果目录</label>
+                <el-input v-model="inferenceConfig.result_path" placeholder="如：/workspace/output" />
+              </div>
+              <div class="resource-field inference-full-width">
+                <label>模板变量</label>
+                <div class="variable-tags" v-if="inferenceVariableNames.length">
+                  <el-tag v-for="name in inferenceVariableNames" :key="name">{{ name }}</el-tag>
+                </div>
+                <div v-else class="form-tip">当前模板未解析到变量，占位符格式为 <code v-pre>{{variable_name}}</code>。</div>
+              </div>
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="命名空间" prop="namespace">
           <el-input v-model="form.namespace" placeholder="default" />
@@ -205,7 +267,94 @@
             </div>
           </div>
         </el-form-item>
-        <el-form-item label="环境变量">
+        <el-form-item label="挂载配置">
+          <div class="mount-panel">
+            <div class="mount-grid">
+              <div class="resource-field">
+                <label>挂载类型</label>
+                <el-select v-model="mountConfig.type" @change="handleMountTypeChange">
+                  <el-option label="不挂载" value="" />
+                  <el-option label="PVC" value="pvc" />
+                  <el-option label="NFS" value="nfs" />
+                </el-select>
+              </div>
+              <div class="resource-field" v-if="mountConfig.type === 'pvc'">
+                <label>PVC 名称</label>
+                <el-input v-model="mountConfig.claim_name" placeholder="如：model-nfs-pvc" />
+              </div>
+              <div class="resource-field mount-browser-field" v-if="mountConfig.type === 'nfs'">
+                <label>NFS 目录</label>
+                <el-input v-model="mountConfig.directory" readonly placeholder="请选择 NFS 目录" />
+                <div class="form-tip" v-if="nfsServer">挂载服务器：{{ nfsServer }}</div>
+                <div class="form-tip" v-if="nfsExportRoot">导出根目录：{{ nfsExportRoot }}</div>
+                <div class="form-tip" v-if="nfsRootPath && nfsRootPath !== nfsExportRoot">浏览目录：{{ nfsRootPath }}</div>
+                <div class="browser-toolbar">
+                  <div class="browser-path">
+                    <span>当前目录：</span>
+                    <code>{{ nfsCurrentPath || '/' }}</code>
+                  </div>
+                  <div class="browser-actions">
+                    <el-button
+                      size="small"
+                      :disabled="nfsDirectoriesLoading || nfsParentPath === null"
+                      @click="openNfsDirectory(nfsParentPath || '')"
+                    >
+                      返回上级
+                    </el-button>
+                    <el-button size="small" :loading="nfsDirectoriesLoading" @click="fetchNfsDirectories(nfsCurrentPath)">
+                      刷新目录
+                    </el-button>
+                  </div>
+                </div>
+                <div class="directory-list" v-if="nfsDirectories.length">
+                  <el-button
+                    v-for="directory in nfsDirectories"
+                    :key="directory.path"
+                    text
+                    class="directory-button"
+                    @click="openNfsDirectory(directory.path)"
+                  >
+                    {{ directory.name }}
+                  </el-button>
+                </div>
+                <el-table
+                  :data="nfsDirectories"
+                  size="small"
+                  v-loading="nfsDirectoriesLoading"
+                  empty-text="当前目录没有可选子目录"
+                  class="mount-directory-table"
+                >
+                  <el-table-column prop="name" label="目录名" min-width="220" />
+                  <el-table-column label="操作" width="120">
+                    <template #default="{ row }">
+                      <el-button
+                        size="small"
+                        :type="mountConfig.directory === row.path ? 'success' : 'primary'"
+                        plain
+                        @click="selectNfsDirectory(row.path)"
+                      >
+                        {{ mountConfig.directory === row.path ? '已选择' : '选择' }}
+                      </el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </div>
+              <div class="resource-field" v-if="mountConfig.type">
+                <label>容器挂载路径</label>
+                <el-input v-model="mountConfig.mount_path" placeholder="如：/workspace/models" />
+              </div>
+              <div class="resource-field" v-if="mountConfig.type">
+                <label>子路径</label>
+                <el-input v-model="mountConfig.sub_path" placeholder="可选，如：project-a" />
+              </div>
+              <div class="resource-field" v-if="mountConfig.type">
+                <label>只读挂载</label>
+                <el-switch v-model="mountConfig.read_only" />
+              </div>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item v-if="createMode === 'model'" label="环境变量">
           <div v-for="(env, index) in envVars" :key="index" class="env-row">
             <el-input v-model="env.key" placeholder="Key" style="width: 150px" />
             <el-input v-model="env.value" placeholder="Value" style="width: 200px; margin-left: 10px" />
@@ -249,6 +398,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useDeploymentsStore } from '@/stores/deployments'
 import { useModelsStore } from '@/stores/models'
 import { useWebSocket } from '@/composables/useWebSocket'
+import { systemApi } from '@/api'
 import { formatDate, getDeploymentStatusText, getDeploymentStatusType } from '@/utils/formatters'
 
 const router = useRouter()
@@ -259,6 +409,7 @@ const { isConnected, progress, progressMessage, error, connect, subscribe, unsub
 const currentPage = ref(1)
 const pageSize = ref(10)
 const createDialogVisible = ref(false)
+const createMode = ref('model')
 const scaleDialogVisible = ref(false)
 const progressDialogVisible = ref(false)
 const submitting = ref(false)
@@ -276,8 +427,14 @@ const currentTaskId = ref('')
 const form = reactive({
   name: '',
   model_id: null,
+  image: '',
   namespace: 'default',
   replicas: 1
+})
+const registryImageOptions = ref([])
+const inferenceConfig = reactive({
+  command_template: '',
+  result_path: ''
 })
 
 const resources = reactive({
@@ -285,6 +442,21 @@ const resources = reactive({
   requests: { cpu: '', memory: '' },
   gpu: { resourceName: '', count: 0 }
 })
+const mountConfig = reactive({
+  type: '',
+  claim_name: '',
+  directory: '',
+  mount_path: '',
+  sub_path: '',
+  read_only: false
+})
+const nfsRootPath = ref('')
+const nfsServer = ref('')
+const nfsExportRoot = ref('')
+const nfsCurrentPath = ref('')
+const nfsParentPath = ref(null)
+const nfsDirectoriesLoading = ref(false)
+const nfsDirectories = ref([])
 
 const envVars = ref([])
 
@@ -318,7 +490,26 @@ const gpuCountOptions = [
 
 const rules = {
   name: [{ required: true, message: '请输入部署名称', trigger: 'blur' }],
-  model_id: [{ required: true, message: '请选择模型', trigger: 'change' }],
+  model_id: [{
+    validator: (rule, value, callback) => {
+      if (createMode.value === 'model' && !value) {
+        callback(new Error('请选择模型'))
+        return
+      }
+      callback()
+    },
+    trigger: 'change'
+  }],
+  image: [{
+    validator: (rule, value, callback) => {
+      if (createMode.value === 'image' && !value) {
+        callback(new Error('请选择镜像'))
+        return
+      }
+      callback()
+    },
+    trigger: 'change'
+  }],
   namespace: [{ required: true, message: '请输入命名空间', trigger: 'blur' }],
   replicas: [{ required: true, message: '请输入副本数', trigger: 'blur' }]
 }
@@ -327,17 +518,75 @@ const readyModels = computed(() => {
   return modelsStore.models.filter(m => m.status === 'ready')
 })
 
-const showCreateDialog = () => {
+const inferenceVariableNames = computed(() => {
+  const matches = inferenceConfig.command_template.matchAll(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g)
+  const seen = new Set()
+  const names = []
+  for (const match of matches) {
+    const name = match[1]
+    if (!seen.has(name)) {
+      seen.add(name)
+      names.push(name)
+    }
+  }
+  return names
+})
+
+const isDeploymentReadyForInference = (deployment) => {
+  return deployment?.status === 'running' || Boolean(deployment?.endpoint)
+}
+
+const shouldShowInferenceAction = (deployment) => {
+  return deployment?.source_type === 'image'
+    && Boolean(deployment?.inference_config?.enabled)
+    && isDeploymentReadyForInference(deployment)
+}
+
+const shouldShowDeployAction = (deployment) => {
+  return !shouldShowInferenceAction(deployment)
+}
+
+const loadRegistryImages = async () => {
+  const response = await systemApi.getRegistryImages()
+  const items = response.data.items || []
+  registryImageOptions.value = items.flatMap(item => (item.tags || []).map(tag => ({
+    repository: item.repository,
+    tag,
+    image_ref: `${item.repository}:${tag}`
+  })))
+}
+
+const showCreateDialog = async (mode = 'model') => {
+  createMode.value = mode
   form.name = ''
   form.model_id = null
+  form.image = ''
   form.namespace = 'default'
   form.replicas = 1
+  inferenceConfig.command_template = ''
+  inferenceConfig.result_path = ''
   resources.limits = { cpu: '', memory: '' }
   resources.requests = { cpu: '', memory: '' }
   resources.gpu = { resourceName: '', count: 0 }
+  mountConfig.type = ''
+  mountConfig.claim_name = ''
+  mountConfig.directory = ''
+  mountConfig.mount_path = ''
+  mountConfig.sub_path = ''
+  mountConfig.read_only = false
+  nfsRootPath.value = ''
+  nfsServer.value = ''
+  nfsExportRoot.value = ''
+  nfsCurrentPath.value = ''
+  nfsParentPath.value = null
+  nfsDirectories.value = []
   envVars.value = []
   createDialogVisible.value = true
-  modelsStore.fetchModels()
+  if (mode === 'model') {
+    await modelsStore.fetchModels()
+  } else {
+    await loadRegistryImages()
+  }
 }
 
 const addEnv = () => {
@@ -350,6 +599,53 @@ const removeEnv = (index) => {
 
 const handleGpuTypeChange = (resourceName) => {
   resources.gpu.count = resourceName ? 1 : 0
+}
+
+const handleMountTypeChange = (type) => {
+  if (type !== 'pvc') {
+    mountConfig.claim_name = ''
+  }
+  if (type !== 'nfs') {
+    mountConfig.directory = ''
+    nfsServer.value = ''
+    nfsExportRoot.value = ''
+    nfsCurrentPath.value = ''
+    nfsParentPath.value = null
+    nfsDirectories.value = []
+  }
+  if (!type) {
+    mountConfig.mount_path = ''
+    mountConfig.sub_path = ''
+    mountConfig.read_only = false
+  }
+  if (type === 'nfs') {
+    fetchNfsDirectories('')
+  }
+}
+
+const fetchNfsDirectories = async (path = '') => {
+  nfsDirectoriesLoading.value = true
+  try {
+    const response = await systemApi.getNfsDirectories(path)
+    nfsRootPath.value = response.data.root_path || ''
+    nfsServer.value = response.data.server || ''
+    nfsExportRoot.value = response.data.export_root || ''
+    nfsCurrentPath.value = response.data.current_path || ''
+    nfsParentPath.value = response.data.parent_path ?? null
+    nfsDirectories.value = response.data.directories || []
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || error.message || '读取 NFS 目录失败')
+  } finally {
+    nfsDirectoriesLoading.value = false
+  }
+}
+
+const openNfsDirectory = async (path = '') => {
+  await fetchNfsDirectories(path)
+}
+
+const selectNfsDirectory = (path) => {
+  mountConfig.directory = path
 }
 
 const buildResourceConfig = () => {
@@ -371,6 +667,28 @@ const buildResourceConfig = () => {
   }
 }
 
+const buildMountConfig = () => {
+  if (!mountConfig.type) {
+    return {}
+  }
+
+  const config = {
+    enabled: true,
+    type: mountConfig.type,
+    mount_path: mountConfig.mount_path,
+    sub_path: mountConfig.sub_path || '',
+    read_only: mountConfig.read_only
+  }
+
+  if (mountConfig.type === 'pvc') {
+    config.claim_name = mountConfig.claim_name
+  } else if (mountConfig.type === 'nfs') {
+    config.directory = mountConfig.directory
+  }
+
+  return config
+}
+
 const submitCreate = async () => {
   if (!formRef.value) return
   
@@ -387,8 +705,17 @@ const submitCreate = async () => {
         
         const data = {
           ...form,
+          source_type: createMode.value,
           resources: buildResourceConfig(),
-          env_vars: envVarsObj
+          mount_config: buildMountConfig(),
+          env_vars: createMode.value === 'model' ? envVarsObj : {},
+          inference_config: createMode.value === 'image' ? {
+            enabled: Boolean(inferenceConfig.command_template.trim() && inferenceConfig.result_path.trim()),
+            command_template: inferenceConfig.command_template.trim(),
+            variable_names: inferenceVariableNames.value,
+            result_source: 'container',
+            result_path: inferenceConfig.result_path.trim()
+          } : {}
         }
         
         await deploymentsStore.createDeployment(data)
@@ -509,6 +836,10 @@ const viewDetail = (row) => {
   router.push(`/deployments/${row.id}`)
 }
 
+const goToInference = (row) => {
+  router.push(`/deployments/${row.id}/inference`)
+}
+
 const refreshDeployments = () => {
   deploymentsStore.fetchDeployments({
     skip: (currentPage.value - 1) * pageSize.value,
@@ -584,6 +915,12 @@ const stopPolling = () => {
   color: #909399;
 }
 
+.form-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #909399;
+}
+
 .endpoint {
   font-family: monospace;
   font-size: 12px;
@@ -604,10 +941,42 @@ const stopPolling = () => {
   background: #fafafa;
 }
 
+.mount-panel {
+  width: 100%;
+  border: 1px solid #dcdfe6;
+  border-radius: 6px;
+  padding: 16px;
+  background: #fafafa;
+}
+
+.mount-browser-field {
+  grid-column: 1 / -1;
+}
+
+.inference-full-width {
+  grid-column: 1 / -1;
+}
+
+.variable-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .resource-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.mount-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.mount-directory-table {
+  margin-top: 12px;
 }
 
 .resource-field {
@@ -654,7 +1023,8 @@ const stopPolling = () => {
 }
 
 @media (max-width: 720px) {
-  .resource-grid {
+  .resource-grid,
+  .mount-grid {
     grid-template-columns: 1fr;
   }
 }

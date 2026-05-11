@@ -513,6 +513,13 @@ onMounted(async () => {
     if (deployment.value?.model_id) {
       const response = await modelsApi.getDetail(deployment.value.model_id)
       model.value = response.data
+    } else {
+      model.value = {
+        name: deployment.value?.image || deployment.value?.name || 'custom-image',
+        model_type: 'custom',
+        source_path: deployment.value?.image || '',
+        config: {}
+      }
     }
   } catch (error) {
     ElMessage.error('获取部署或模型详情失败')
