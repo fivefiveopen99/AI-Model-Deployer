@@ -1,26 +1,56 @@
 <template>
-  <div class="registry-images-page">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <div>
-            <div class="title">镜像管理</div>
-            <div class="subtitle">
-              <span>仓库地址：{{ registryUrl || '未配置' }}</span>
-              <span v-if="namespacePrefix">命名空间：{{ namespacePrefix }}</span>
-            </div>
-          </div>
-          <div class="header-actions">
-            <el-button type="primary" @click="openImageUploadDialog">
-              <el-icon><Upload /></el-icon>
-              镜像上传
-            </el-button>
-            <el-button @click="fetchImages" :loading="loading">
-              <el-icon><Refresh /></el-icon>
-              刷新
-            </el-button>
-          </div>
-        </div>
+  <div class="page-shell registry-images-page">
+    <PageHero
+      eyebrow="Registry Workspace"
+      title="镜像仓库管理"
+      description="统一查看私有 Registry 中的仓库、标签和导入入口，同时保留手动构建与本地镜像上传流程。"
+    >
+      <template #meta>
+        <span class="badge-pill">Registry {{ registryUrl || '未配置' }}</span>
+        <span v-if="namespacePrefix" class="badge-pill">Namespace {{ namespacePrefix }}</span>
+      </template>
+      <template #actions>
+        <el-button type="primary" @click="openImageUploadDialog">
+          <el-icon><Upload /></el-icon>
+          镜像上传
+        </el-button>
+        <el-button @click="fetchImages" :loading="loading">
+          <el-icon><Refresh /></el-icon>
+          刷新
+        </el-button>
+      </template>
+    </PageHero>
+
+    <section class="metrics-grid">
+      <MetricCard label="Repositories" :value="totalRepositories" hint="已发现的 Registry 仓库数量" tone="brand">
+        <template #icon>
+          <el-icon :size="28"><Collection /></el-icon>
+        </template>
+      </MetricCard>
+      <MetricCard label="Tags" :value="totalTags" hint="全部仓库下的标签总数" tone="success">
+        <template #icon>
+          <el-icon :size="28"><PriceTag /></el-icon>
+        </template>
+      </MetricCard>
+      <MetricCard label="Entries" :value="flatImages.length" hint="展开后的仓库标签条目数" tone="warning">
+        <template #icon>
+          <el-icon :size="28"><Files /></el-icon>
+        </template>
+      </MetricCard>
+      <MetricCard label="Import Modes" value="3" hint="手动构建、压缩包上传、本地目录上传" tone="default">
+        <template #icon>
+          <el-icon :size="28"><Upload /></el-icon>
+        </template>
+      </MetricCard>
+    </section>
+
+    <PanelCard
+      eyebrow="Registry Inventory"
+      title="镜像列表"
+      description="镜像浏览、删除与导入都在同一个面板里完成，避免在工具页之间跳转。"
+    >
+      <template #actions>
+        <span class="badge-pill">{{ flatImages.length }} 条镜像</span>
       </template>
 
       <el-alert
@@ -31,27 +61,6 @@
         :closable="false"
         class="mb-16"
       />
-
-      <el-row :gutter="16" class="summary-row">
-        <el-col :span="8">
-          <el-card shadow="never" class="summary-card">
-            <div class="summary-value">{{ totalRepositories }}</div>
-            <div class="summary-label">仓库数</div>
-          </el-card>
-        </el-col>
-        <el-col :span="8">
-          <el-card shadow="never" class="summary-card">
-            <div class="summary-value">{{ totalTags }}</div>
-            <div class="summary-label">标签数</div>
-          </el-card>
-        </el-col>
-        <el-col :span="8">
-          <el-card shadow="never" class="summary-card">
-            <div class="summary-value">{{ flatImages.length }}</div>
-            <div class="summary-label">镜像条目数</div>
-          </el-card>
-        </el-col>
-      </el-row>
 
       <el-table :data="flatImages" v-loading="loading" stripe>
         <el-table-column prop="repository" label="Repository" min-width="260" />
@@ -77,8 +86,18 @@
             </el-button>
           </template>
         </el-table-column>
+        <template #empty>
+          <EmptyState
+            title="私有仓库为空"
+            description="先从 Dockerfile 手动构建，或导入已有镜像 tar 包，后续就可以直接从这里部署。"
+          >
+            <template #actions>
+              <el-button type="primary" @click="openImageUploadDialog">导入镜像</el-button>
+            </template>
+          </EmptyState>
+        </template>
       </el-table>
-    </el-card>
+    </PanelCard>
 
     <el-dialog v-model="imageUploadDialogVisible" title="镜像上传" width="760px">
       <el-tabs v-model="activeUploadTab" @tab-change="handleUploadTabChange">
@@ -287,6 +306,10 @@
       </div>
       <template #footer>
         <div class="dialog-footer">
+          <el-button v-if="registryBuildStore.building" type="danger" @click="stopRegistryBuild">
+            <el-icon><CircleClose /></el-icon>
+            停止构建
+          </el-button>
           <el-button v-if="registryBuildStore.building" type="primary" @click="minimizeBuildProgress">
             最小化到后台
           </el-button>
@@ -299,12 +322,12 @@
 
     <div
       v-if="registryBuildStore.isProgressMinimized && registryBuildStore.building"
-      class="minimized-progress"
+      class="floating-progress"
       @click="restoreBuildProgress"
     >
-      <div class="minimized-content">
+      <div class="floating-progress__content">
         <el-icon class="is-loading"><Refresh /></el-icon>
-        <span class="minimized-text">构建中 {{ registryBuildStore.buildProgress }}%</span>
+        <span class="floating-progress__text">构建中 {{ registryBuildStore.buildProgress }}%</span>
         <el-progress
           :percentage="registryBuildStore.buildProgress"
           :show-text="false"
@@ -319,7 +342,11 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Upload } from '@element-plus/icons-vue'
+import { CircleClose, Refresh, Upload } from '@element-plus/icons-vue'
+import PageHero from '@/components/ui/PageHero.vue'
+import MetricCard from '@/components/ui/MetricCard.vue'
+import PanelCard from '@/components/ui/PanelCard.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { systemApi } from '@/api'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useRegistryBuildStore } from '@/stores/registryBuild'
@@ -689,6 +716,32 @@ const clearBuildLogs = () => {
   registryBuildStore.setLogs([])
 }
 
+const stopRegistryBuild = async () => {
+  if (!registryBuildStore.currentTaskId) {
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      '确定要停止当前镜像构建任务吗？',
+      '确认停止',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    await systemApi.stopRegistryBuild(registryBuildStore.currentTaskId)
+    registryBuildStore.stopBuild()
+    ElMessage.info('构建已停止')
+  } catch (err) {
+    if (err !== 'cancel') {
+      ElMessage.error('停止构建失败: ' + (err.response?.data?.detail || err.message))
+    }
+  }
+}
+
 const deleteImage = async (row) => {
   try {
     await ElMessageBox.confirm(
@@ -747,7 +800,11 @@ const unwatchMessage = watch(() => lastMessage.value, async (message) => {
 
   if (message.data?.error) {
     registryBuildStore.setError(message.message)
-    ElMessage.error(message.message)
+    if (message.data?.cancelled) {
+      ElMessage.info(message.message)
+    } else {
+      ElMessage.error(message.message)
+    }
     return
   }
 

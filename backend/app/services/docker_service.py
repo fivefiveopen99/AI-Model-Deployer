@@ -13,6 +13,10 @@ from app.core.config import settings
 from app.services.model_service_template import MODEL_SERVICE_TEMPLATE
 
 
+class DockerTaskCancelledError(Exception):
+    """Raised when a user stops an active Docker build/push task."""
+
+
 PLATE_SERVICE_API = r'''import base64
 import io
 import logging
@@ -602,7 +606,59 @@ class DockerService:
     def __init__(self):
         self._connected = False
         self._docker_available = False
+        self._task_processes: Dict[str, set] = {}
+        self._cancelled_tasks = set()
         self._check_docker()
+
+    def register_cancelable_task(self, task_id: str):
+        self._task_processes.setdefault(task_id, set())
+        self._cancelled_tasks.discard(task_id)
+
+    def unregister_cancelable_task(self, task_id: str):
+        self._task_processes.pop(task_id, None)
+        self._cancelled_tasks.discard(task_id)
+
+    def has_cancelable_task(self, task_id: str) -> bool:
+        return task_id in self._task_processes
+
+    def _attach_process_to_task(self, task_id: Optional[str], process):
+        if not task_id or process is None:
+            return
+        self._task_processes.setdefault(task_id, set()).add(process)
+
+    def _detach_process_from_task(self, task_id: Optional[str], process):
+        if not task_id or process is None:
+            return
+        processes = self._task_processes.get(task_id)
+        if not processes:
+            return
+        processes.discard(process)
+
+    def _raise_if_task_cancelled(self, task_id: Optional[str]):
+        if task_id and task_id in self._cancelled_tasks:
+            raise DockerTaskCancelledError("构建已停止")
+
+    async def cancel_task(self, task_id: str) -> int:
+        self._cancelled_tasks.add(task_id)
+        processes = list(self._task_processes.get(task_id, set()))
+
+        stopped = 0
+        for process in processes:
+            if process.returncode is not None:
+                continue
+            process.terminate()
+            stopped += 1
+
+        for process in processes:
+            if process.returncode is not None:
+                continue
+            try:
+                await asyncio.wait_for(process.wait(), timeout=3)
+            except asyncio.TimeoutError:
+                process.kill()
+                await process.wait()
+
+        return stopped
 
     def detect_model_type(self, model_path: str) -> str:
         """自动检测模型类型"""
@@ -693,7 +749,8 @@ class DockerService:
         source_type: str,
         base_image: str = "python:3.11-slim",
         config: Dict[str, Any] = None,
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        task_id: Optional[str] = None
     ) -> Dict[str, Any]:
         if not self.is_connected:
             raise Exception("Docker is not connected")
@@ -709,6 +766,8 @@ class DockerService:
         os.makedirs(build_context, exist_ok=True)
 
         try:
+            self._raise_if_task_cancelled(task_id)
+
             if progress_callback:
                 await progress_callback(10, "Preparing build context...")
 
@@ -780,12 +839,13 @@ class DockerService:
                 await progress_callback(50, "Building Docker image...")
 
             # 使用异步命令行构建镜像
-            await self._build_image_cmd_async(build_context, image_tag, progress_callback)
+            await self._build_image_cmd_async(build_context, image_tag, progress_callback, task_id=task_id)
 
             if progress_callback:
                 await progress_callback(90, "Finalizing...")
 
             # 获取镜像信息
+            self._raise_if_task_cancelled(task_id)
             image_info = await self._get_image_info_async(image_tag)
 
             if progress_callback:
@@ -803,36 +863,38 @@ class DockerService:
             # 构建上下文只用于 docker build；镜像创建完成后可以安全删除。
             shutil.rmtree(build_context, ignore_errors=True)
 
-    async def _build_image_cmd_async(self, build_context: str, tag: str, progress_callback=None):
+    async def _build_image_cmd_async(self, build_context: str, tag: str, progress_callback=None, task_id: Optional[str] = None):
         """使用命令行异步构建镜像，支持进度回调"""
         import asyncio
 
-        # 使用 legacy builder 以兼容没有 buildx 组件的 Docker 环境。
-        env = os.environ.copy()
-        env['DOCKER_BUILDKIT'] = '0'
-        
-        process = await asyncio.create_subprocess_exec(
-            'docker', 'build', '-t', tag, build_context,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env
-        )
+        async def run_build_attempt(env_overrides=None, attempt_label="default builder"):
+            env = os.environ.copy()
+            if env_overrides:
+                env.update(env_overrides)
 
-        # 读取输出并发送进度
-        step = 0
-        error_lines = []
-        
-        async def read_stream(stream, is_stderr=False):
-            nonlocal step
-            while True:
-                line = await stream.readline()
-                if not line:
-                    break
-                line_str = line.decode('utf-8', errors='ignore').strip()
-                if line_str:
-                    print(f"Docker build: {line_str}")
-                    if is_stderr:
-                        error_lines.append(line_str)
+            self._raise_if_task_cancelled(task_id)
+            process = await asyncio.create_subprocess_exec(
+                'docker', 'build', '-t', tag, build_context,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env
+            )
+            self._attach_process_to_task(task_id, process)
+
+            step = 0
+            output_lines = []
+
+            async def read_stream(stream, is_stderr=False):
+                nonlocal step
+                while True:
+                    line = await stream.readline()
+                    if not line:
+                        break
+                    line_str = line.decode('utf-8', errors='ignore').strip()
+                    if not line_str:
+                        continue
+                    print(f"Docker build ({attempt_label}): {line_str}")
+                    output_lines.append(line_str)
                     step += 1
                     if progress_callback:
                         progress = min(50 + step, 85)
@@ -842,26 +904,49 @@ class DockerService:
                             {"log": line_str, "stream": "stderr" if is_stderr else "stdout"},
                             persist_status=False
                         )
-                    # 每10行输出更新一次进度 (50% -> 85%)
-                    if progress_callback and step % 10 == 0:
-                        progress = min(50 + step, 85)
-                        await progress_callback(progress, f"Building Docker image... ({step} steps)")
+                        if step % 10 == 0:
+                            await progress_callback(progress, f"Building Docker image... ({step} steps)")
 
-        # 同时读取 stdout 和 stderr
-        await asyncio.gather(
-            read_stream(process.stdout, is_stderr=False),
-            read_stream(process.stderr, is_stderr=True)
+            try:
+                await asyncio.gather(
+                    read_stream(process.stdout, is_stderr=False),
+                    read_stream(process.stderr, is_stderr=True)
+                )
+                await process.wait()
+            finally:
+                self._detach_process_from_task(task_id, process)
+
+            if process.returncode == 0:
+                self._raise_if_task_cancelled(task_id)
+                return True, output_lines
+            if task_id and task_id in self._cancelled_tasks:
+                raise DockerTaskCancelledError("构建已停止")
+            return False, output_lines
+
+        success, output_lines = await run_build_attempt(attempt_label="default builder")
+        if success:
+            print("Docker build completed successfully")
+            return "Build completed"
+
+        error_text = "\n".join(output_lines[-20:]) if output_lines else "Docker build failed"
+        should_retry_legacy = (
+            "buildx component is missing or broken" in error_text
+            or "BuildKit is enabled but the buildx component is missing or broken" in error_text
         )
 
-        # 等待进程完成
-        await process.wait()
+        if should_retry_legacy:
+            if progress_callback:
+                await progress_callback(55, "BuildKit/buildx unavailable, retrying with legacy builder...")
+            success, output_lines = await run_build_attempt(
+                env_overrides={'DOCKER_BUILDKIT': '0'},
+                attempt_label="legacy builder"
+            )
+            if success:
+                print("Docker build completed successfully")
+                return "Build completed"
+            error_text = "\n".join(output_lines[-20:]) if output_lines else "Docker build failed"
 
-        if process.returncode != 0:
-            error_msg = "\n".join(error_lines[-10:]) if error_lines else "Docker build failed"
-            raise Exception(f"Docker build failed: {error_msg}")
-
-        print(f"Docker build completed successfully")
-        return "Build completed"
+        raise Exception(f"Docker build failed: {error_text}")
 
     def _get_image_info_cmd(self, image_tag: str) -> Dict:
         """使用命令行获取镜像信息"""
@@ -901,8 +986,9 @@ class DockerService:
                 pass
         return {"Id": "", "Size": 0}
 
-    async def push_image_to_registry(self, image_tag: str, progress_callback=None) -> Dict[str, Any]:
+    async def push_image_to_registry(self, image_tag: str, progress_callback=None, task_id: Optional[str] = None) -> Dict[str, Any]:
         """Tag and push a built image to the configured Docker registry."""
+        self._raise_if_task_cancelled(task_id)
         registry_url = settings.DOCKER_REGISTRY_URL.rstrip("/")
         push_registry_url = (settings.DOCKER_REGISTRY_PUSH_URL or settings.DOCKER_REGISTRY_URL).rstrip("/")
         if not registry_url:
@@ -925,7 +1011,8 @@ class DockerService:
             await self._docker_login_async(
                 registry_host,
                 settings.DOCKER_REGISTRY_USERNAME,
-                settings.DOCKER_REGISTRY_PASSWORD
+                settings.DOCKER_REGISTRY_PASSWORD,
+                task_id=task_id
             )
 
         if progress_callback:
@@ -933,7 +1020,8 @@ class DockerService:
 
         await self._run_docker_command_async(
             ["docker", "tag", image_tag, push_image],
-            "Docker tag failed"
+            "Docker tag failed",
+            task_id=task_id
         )
 
         if progress_callback:
@@ -944,8 +1032,10 @@ class DockerService:
             "Docker push failed",
             progress_callback=progress_callback,
             progress_start=92,
-            progress_end=98
+            progress_end=98,
+            task_id=task_id
         )
+        self._raise_if_task_cancelled(task_id)
 
         return {
             "success": True,
@@ -968,16 +1058,21 @@ class DockerService:
                 "then recreate the backend container."
             ) from e
 
-    async def _docker_login_async(self, registry_host: str, username: str, password: str):
+    async def _docker_login_async(self, registry_host: str, username: str, password: str, task_id: Optional[str] = None):
+        self._raise_if_task_cancelled(task_id)
         process = await asyncio.create_subprocess_exec(
             "docker", "login", registry_host, "-u", username, "--password-stdin",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
+        self._attach_process_to_task(task_id, process)
         stdout, stderr = await process.communicate(f"{password}\n".encode("utf-8"))
+        self._detach_process_from_task(task_id, process)
 
         if process.returncode != 0:
+            if task_id and task_id in self._cancelled_tasks:
+                raise DockerTaskCancelledError("构建已停止")
             error_msg = stderr.decode("utf-8", errors="ignore") or stdout.decode("utf-8", errors="ignore")
             raise Exception(f"Docker login failed for {registry_host}: {error_msg.strip()}")
 
@@ -987,13 +1082,16 @@ class DockerService:
         error_prefix: str,
         progress_callback=None,
         progress_start: int = 0,
-        progress_end: int = 100
+        progress_end: int = 100,
+        task_id: Optional[str] = None
     ):
+        self._raise_if_task_cancelled(task_id)
         process = await asyncio.create_subprocess_exec(
             *command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
+        self._attach_process_to_task(task_id, process)
 
         output_lines = []
         line_count = 0
@@ -1019,10 +1117,15 @@ class DockerService:
                         persist_status=line_count % 5 == 0
                     )
 
-        await asyncio.gather(read_stream(process.stdout), read_stream(process.stderr))
-        await process.wait()
+        try:
+            await asyncio.gather(read_stream(process.stdout), read_stream(process.stderr))
+            await process.wait()
+        finally:
+            self._detach_process_from_task(task_id, process)
 
         if process.returncode != 0:
+            if task_id and task_id in self._cancelled_tasks:
+                raise DockerTaskCancelledError("构建已停止")
             error_msg = "\n".join(output_lines[-10:]) if output_lines else "Unknown error"
             raise Exception(f"{error_prefix}: {error_msg}")
 

@@ -1,36 +1,39 @@
 <template>
-  <div class="model-playground-page">
-    <el-page-header @back="$router.back()" title="模型交互测试" />
-
-    <el-card v-if="deployment" class="playground-card">
-      <template #header>
-        <div class="card-header">
-          <div>
-            <span class="title">{{ deployment.name }}</span>
-            <el-tag :type="getDeploymentStatusType(deployment.status)" class="status-tag">
-              {{ getDeploymentStatusText(deployment.status) }}
-            </el-tag>
-            <el-tag class="status-tag" type="info">
-              {{ modelProfile.label }}
-            </el-tag>
-          </div>
-          <el-button type="primary" @click="showApiDocs" v-if="deployment.endpoint">
-            <el-icon><Document /></el-icon>
-            API文档
-          </el-button>
-        </div>
+  <div class="page-shell model-playground-page">
+    <PageHero
+      eyebrow="Interactive Playground"
+      :title="deployment?.name || '模型交互测试'"
+      description="统一测试模型服务端点、请求参数和返回结果，避免在外部工具和平台页面之间来回切换。"
+    >
+      <template #meta v-if="deployment">
+        <span class="badge-pill">Status {{ getDeploymentStatusText(deployment.status) }}</span>
+        <span class="badge-pill">{{ modelProfile.label }}</span>
+        <span class="badge-pill">{{ deployment.endpoint ? 'Endpoint Ready' : 'Pending Deploy' }}</span>
       </template>
+      <template #actions>
+        <el-button @click="$router.back()">返回</el-button>
+        <el-button type="primary" @click="showApiDocs" v-if="deployment?.endpoint">
+          <el-icon><Document /></el-icon>
+          API 文档
+        </el-button>
+      </template>
+    </PageHero>
 
-      <el-alert
-        v-if="!deployment.endpoint"
-        title="模型尚未部署，无法进行交互测试"
-        type="warning"
-        show-icon
-        :closable="false"
-      />
+    <template v-if="deployment">
+      <PanelCard
+        eyebrow="Service"
+        title="端点与健康检查"
+        description="先确认部署服务已经可访问，再进入具体请求。"
+      >
+        <el-alert
+          v-if="!deployment.endpoint"
+          title="模型尚未部署，无法进行交互测试"
+          type="warning"
+          show-icon
+          :closable="false"
+        />
 
-      <div v-else>
-        <div class="section compact-section">
+        <div v-else class="content-stack">
           <div class="endpoint-row">
             <span class="section-label">服务端点</span>
             <el-input v-model="baseUrl" readonly>
@@ -54,115 +57,118 @@
             <span v-if="healthResult.data?.model_type">模型服务类型：{{ healthResult.data.model_type }}</span>
           </div>
         </div>
+      </PanelCard>
 
-        <div class="section">
-          <div class="section-title">
-            <h4>{{ modelProfile.title }}</h4>
-            <span>{{ modelProfile.description }}</span>
-          </div>
+      <PanelCard
+        v-if="deployment.endpoint"
+        eyebrow="Request"
+        :title="modelProfile.title"
+        :description="modelProfile.description"
+      >
+        <el-form label-position="top">
+          <template v-if="modelProfile.kind === 'image'">
+            <div class="image-workbench">
+              <div class="upload-panel">
+                <el-form-item label="输入图片">
+                  <el-upload
+                    ref="uploadRef"
+                    :auto-upload="false"
+                    :on-change="handleFileChange"
+                    :on-remove="handleFileRemove"
+                    :limit="1"
+                    drag
+                    accept="image/*"
+                  >
+                    <el-icon class="el-icon--upload"><upload-filled /></el-icon>
+                    <div class="el-upload__text">
+                      拖拽图片到此处或 <em>点击上传</em>
+                    </div>
+                  </el-upload>
+                </el-form-item>
 
-          <el-form label-position="top">
-            <template v-if="modelProfile.kind === 'image'">
-              <div class="image-workbench">
-                <div class="upload-panel">
-                  <el-form-item label="输入图片">
-                    <el-upload
-                      ref="uploadRef"
-                      :auto-upload="false"
-                      :on-change="handleFileChange"
-                      :on-remove="handleFileRemove"
-                      :limit="1"
-                      drag
-                      accept="image/*"
-                    >
-                      <el-icon class="el-icon--upload"><upload-filled /></el-icon>
-                      <div class="el-upload__text">
-                        拖拽图片到此处或 <em>点击上传</em>
-                      </div>
-                    </el-upload>
+                <div class="params-grid">
+                  <el-form-item label="置信度">
+                    <el-slider v-model="imageParams.conf" :min="0.05" :max="0.95" :step="0.05" show-input />
                   </el-form-item>
-
-                  <div class="params-grid">
-                    <el-form-item label="置信度">
-                      <el-slider v-model="imageParams.conf" :min="0.05" :max="0.95" :step="0.05" show-input />
-                    </el-form-item>
-                    <el-form-item label="IoU">
-                      <el-slider v-model="imageParams.iou" :min="0.1" :max="0.9" :step="0.05" show-input />
-                    </el-form-item>
-                    <el-form-item label="结果图">
-                      <el-switch v-model="imageParams.returnImage" active-text="返回标注图" />
-                    </el-form-item>
-                  </div>
-
-                  <div class="actions-row">
-                    <el-button type="primary" @click="sendPredict" :loading="loading">
-                      <el-icon><Promotion /></el-icon>
-                      开始预测
-                    </el-button>
-                    <el-button @click="clearResult">
-                      <el-icon><Delete /></el-icon>
-                      清空
-                    </el-button>
-                  </div>
+                  <el-form-item label="IoU">
+                    <el-slider v-model="imageParams.iou" :min="0.1" :max="0.9" :step="0.05" show-input />
+                  </el-form-item>
+                  <el-form-item label="结果图">
+                    <el-switch v-model="imageParams.returnImage" active-text="返回标注图" />
+                  </el-form-item>
                 </div>
 
-                <div class="preview-panel">
-                  <div class="preview-box">
-                    <img v-if="imagePreviewUrl" :src="imagePreviewUrl" alt="输入图片预览" />
-                    <span v-else>等待上传图片</span>
-                  </div>
+                <div class="actions-row">
+                  <el-button type="primary" @click="sendPredict" :loading="loading">
+                    <el-icon><Promotion /></el-icon>
+                    开始预测
+                  </el-button>
+                  <el-button @click="clearResult">
+                    <el-icon><Delete /></el-icon>
+                    清空
+                  </el-button>
                 </div>
               </div>
-            </template>
 
-            <template v-else-if="modelProfile.kind === 'text'">
-              <el-form-item label="文本输入">
-                <el-input v-model="textInput" type="textarea" :rows="8" placeholder="输入要测试的文本" />
-              </el-form-item>
-              <el-form-item label="参数 JSON">
-                <el-input v-model="parametersInput" type="textarea" :rows="4" />
-              </el-form-item>
-              <div class="actions-row">
-                <el-button type="primary" @click="sendPredict" :loading="loading">
-                  <el-icon><Promotion /></el-icon>
-                  开始预测
-                </el-button>
-                <el-button @click="clearResult">
-                  <el-icon><Delete /></el-icon>
-                  清空
-                </el-button>
+              <div class="preview-panel">
+                <div class="preview-box">
+                  <img v-if="imagePreviewUrl" :src="imagePreviewUrl" alt="输入图片预览" />
+                  <span v-else>等待上传图片</span>
+                </div>
               </div>
-            </template>
+            </div>
+          </template>
 
-            <template v-else>
-              <el-form-item label="请求数据 JSON">
-                <el-input v-model="jsonInput" type="textarea" :rows="10" />
-              </el-form-item>
-              <div class="actions-row">
-                <el-button type="primary" @click="sendPredict" :loading="loading">
-                  <el-icon><Promotion /></el-icon>
-                  发送请求
-                </el-button>
-                <el-button @click="clearResult">
-                  <el-icon><Delete /></el-icon>
-                  清空
-                </el-button>
-              </div>
-            </template>
-          </el-form>
-        </div>
+          <template v-else-if="modelProfile.kind === 'text'">
+            <el-form-item label="文本输入">
+              <el-input v-model="textInput" type="textarea" :rows="8" placeholder="输入要测试的文本" />
+            </el-form-item>
+            <el-form-item label="参数 JSON">
+              <el-input v-model="parametersInput" type="textarea" :rows="4" />
+            </el-form-item>
+            <div class="actions-row">
+              <el-button type="primary" @click="sendPredict" :loading="loading">
+                <el-icon><Promotion /></el-icon>
+                开始预测
+              </el-button>
+              <el-button @click="clearResult">
+                <el-icon><Delete /></el-icon>
+                清空
+              </el-button>
+            </div>
+          </template>
 
-        <div v-if="predictResult" class="result-section">
-          <el-divider />
+          <template v-else>
+            <el-form-item label="请求数据 JSON">
+              <el-input v-model="jsonInput" type="textarea" :rows="10" />
+            </el-form-item>
+            <div class="actions-row">
+              <el-button type="primary" @click="sendPredict" :loading="loading">
+                <el-icon><Promotion /></el-icon>
+                发送请求
+              </el-button>
+              <el-button @click="clearResult">
+                <el-icon><Delete /></el-icon>
+                清空
+              </el-button>
+            </div>
+          </template>
+        </el-form>
+      </PanelCard>
+
+      <PanelCard
+        v-if="predictResult"
+        eyebrow="Response"
+        title="预测结果"
+        description="结果摘要、结构化表格和原始返回值集中查看。"
+      >
+        <div class="result-section">
           <div class="result-header">
-            <div>
-              <h4>预测结果</h4>
-              <div class="result-meta">
-                <el-tag :type="predictResult.status >= 200 && predictResult.status < 300 ? 'success' : 'danger'">
-                  HTTP {{ predictResult.status }}
-                </el-tag>
-                <span>{{ predictResult.responseTime }}ms</span>
-              </div>
+            <div class="result-meta">
+              <el-tag :type="predictResult.status >= 200 && predictResult.status < 300 ? 'success' : 'danger'">
+                HTTP {{ predictResult.status }}
+              </el-tag>
+              <span>{{ predictResult.responseTime }}ms</span>
             </div>
             <el-button
               v-if="processedImageUrl"
@@ -207,14 +213,14 @@
             </div>
           </template>
 
-          <pre class="result-code">{{ formatResult(displayResult) }}</pre>
+          <CodeBlock class="result-code" :content="formatResult(displayResult)" />
         </div>
-      </div>
-    </el-card>
+      </PanelCard>
+    </template>
 
     <el-skeleton v-else :rows="10" animated />
 
-    <el-dialog v-model="apiDocsVisible" title="API文档" width="700px">
+    <el-dialog v-model="apiDocsVisible" title="API 文档" width="720px">
       <div class="api-docs">
         <h4>健康检查接口</h4>
         <el-descriptions :column="1" border>
@@ -237,9 +243,12 @@
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import PageHero from '@/components/ui/PageHero.vue'
+import PanelCard from '@/components/ui/PanelCard.vue'
+import CodeBlock from '@/components/ui/CodeBlock.vue'
 import { useDeploymentsStore } from '@/stores/deployments'
 import { modelsApi } from '@/api'
-import { getDeploymentStatusText, getDeploymentStatusType } from '@/utils/formatters'
+import { getDeploymentStatusText } from '@/utils/formatters'
 import axios from 'axios'
 
 const route = useRoute()
@@ -529,69 +538,21 @@ onMounted(async () => {
 
 <style scoped>
 .model-playground-page {
-  padding: 0;
-}
-
-.playground-card {
-  margin-top: 20px;
-}
-
-.card-header,
-.endpoint-row,
-.result-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.title {
-  font-size: 18px;
-  font-weight: 700;
-  margin-right: 10px;
-}
-
-.status-tag {
-  margin-left: 8px;
-}
-
-.section {
-  margin: 24px 0;
-}
-
-.compact-section {
-  margin-top: 8px;
+  padding: 2px 0 10px;
 }
 
 .section-label {
   flex: 0 0 auto;
-  color: #606266;
   font-weight: 600;
-}
-
-.section-title {
-  margin-bottom: 16px;
-}
-
-.section-title h4,
-.result-header h4 {
-  margin: 0 0 6px 0;
-  color: #303133;
-  font-weight: 700;
-}
-
-.section-title span,
-.health-line,
-.result-meta {
-  color: #909399;
-  font-size: 13px;
 }
 
 .health-line {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 12px;
+  flex-wrap: wrap;
+  color: var(--ui-text-soft);
+  font-size: 13px;
 }
 
 .image-workbench {
@@ -614,17 +575,19 @@ onMounted(async () => {
 .actions-row {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
   margin-top: 8px;
 }
 
 .preview-box {
   aspect-ratio: 4 / 3;
-  border: 1px dashed #dcdfe6;
-  background: #f5f7fa;
+  border: 1px dashed rgba(68, 80, 86, 0.16);
+  background: rgba(248, 249, 245, 0.94);
+  border-radius: 20px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #909399;
+  color: var(--ui-text-faint);
   overflow: hidden;
 }
 
@@ -636,19 +599,24 @@ onMounted(async () => {
 }
 
 .result-section {
-  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .result-meta {
   display: flex;
   align-items: center;
   gap: 12px;
+  color: var(--ui-text-soft);
+  font-size: 13px;
+  flex-wrap: wrap;
 }
 
 .summary-table,
 .plates-table,
 .processed-preview {
-  margin-top: 16px;
+  margin-top: 4px;
 }
 
 .processed-preview {
@@ -657,28 +625,14 @@ onMounted(async () => {
 
 .processed-preview h5 {
   margin: 0 0 10px;
-  color: #606266;
+  color: var(--ui-text-soft);
 }
 
 .processed-preview img {
-  border: 1px solid #ebeef5;
+  border: 1px solid var(--ui-border);
+  border-radius: 18px;
   max-height: 520px;
-  background: #f5f7fa;
-}
-
-.result-code {
-  background-color: #f5f7fa;
-  padding: 15px;
-  border-radius: 4px;
-  overflow-x: auto;
-  font-family: 'Courier New', monospace;
-  font-size: 13px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  max-height: 400px;
-  overflow-y: auto;
-  margin-top: 16px;
+  background: rgba(248, 249, 245, 0.92);
 }
 
 .api-docs {
@@ -687,7 +641,7 @@ onMounted(async () => {
 
 .api-docs h4 {
   margin: 20px 0 10px;
-  color: #303133;
+  color: var(--ui-text);
 }
 
 :deep(.el-upload-dragger) {

@@ -1,96 +1,149 @@
 <template>
-  <div class="deployment-inference-page">
-    <el-page-header @back="goBack" title="命令推理" />
-
-    <el-card v-if="deployment" class="detail-card">
-      <template #header>
-        <div class="card-header">
-          <div>
-            <div class="page-title">{{ deployment.name }}</div>
-            <div class="page-subtitle">{{ deployment.image || '镜像部署' }}</div>
-          </div>
-          <el-tag :type="getDeploymentStatusType(deployment.status)">
-            {{ getDeploymentStatusText(deployment.status) }}
-          </el-tag>
-        </div>
+  <div class="page-shell deployment-inference-page">
+    <PageHero
+      eyebrow="Command Workbench"
+      :title="deployment?.name || '命令工作台'"
+      description="面向镜像部署的命令执行工作台，统一查看变量输入、实时输出和结果文件。"
+    >
+      <template #meta v-if="deployment">
+        <span class="badge-pill">Status {{ getDeploymentStatusText(deployment.status) }}</span>
+        <span class="badge-pill">{{ deployment.image || '镜像命令工作台' }}</span>
       </template>
+      <template #actions>
+        <el-button @click="goBack">返回</el-button>
+        <el-button v-if="deployment" @click="router.push(`/deployments/${deployment.id}`)">部署详情</el-button>
+      </template>
+    </PageHero>
 
+    <template v-if="deployment">
       <el-alert
         v-if="deployment.source_type !== 'image'"
-        title="只有镜像部署支持命令推理"
+        title="只有镜像部署支持命令工作台"
         type="info"
         :closable="false"
         show-icon
       />
       <el-alert
         v-else-if="!inferenceEnabled"
-        title="该部署未配置推理命令"
+        title="该部署未配置命令运行参数"
         type="warning"
         :closable="false"
         show-icon
       />
       <template v-else>
-        <div class="section-subtitle">推理命令模板</div>
-        <pre class="config-code">{{ inferenceConfig.command_template }}</pre>
+        <PanelCard
+          eyebrow="Command"
+          title="命令模板与运行配置"
+          description="先检查命令模板、结果目录和部署运行态，再执行任务。"
+        >
+          <el-alert
+            v-if="!deploymentReady"
+            title="工作台已创建，但该镜像部署尚未部署到 Kubernetes。请先完成部署，再运行命令。"
+            type="warning"
+            :closable="false"
+            show-icon
+            class="workbench-alert"
+          />
 
-        <el-descriptions :column="2" border class="meta-table">
-          <el-descriptions-item label="K8s Deployment">
-            {{ deployment.k8s_deployment_name || '-' }}
-          </el-descriptions-item>
-          <el-descriptions-item label="结果目录">
-            {{ inferenceConfig.result_path || '-' }}
-          </el-descriptions-item>
-        </el-descriptions>
+          <div class="section-subtitle">命令模板</div>
+          <CodeBlock :content="inferenceConfig.command_template" />
 
-        <div v-if="inferenceVariableNames.length" class="variable-form">
-          <div class="section-subtitle">变量输入</div>
-          <div class="variable-grid">
-            <div v-for="name in inferenceVariableNames" :key="name" class="variable-field">
-              <label>{{ name }}</label>
-              <el-input v-model="inferenceVariables[name]" :placeholder="`请输入 ${name}`" />
+          <el-descriptions :column="2" border class="meta-table">
+            <el-descriptions-item label="访问模式">
+              平台命令工作台
+            </el-descriptions-item>
+            <el-descriptions-item label="K8s Deployment">
+              {{ deployment.k8s_deployment_name || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="结果目录">
+              {{ inferenceConfig.result_path || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="最近运行">
+              {{ lastRunStatus }}
+            </el-descriptions-item>
+          </el-descriptions>
+
+          <div v-if="inferenceVariableNames.length" class="variable-form">
+            <div class="section-subtitle">输入参数</div>
+            <div class="variable-grid">
+              <div v-for="name in inferenceVariableNames" :key="name" class="variable-field">
+                <label>{{ name }}</label>
+                <el-input v-model="inferenceVariables[name]" :placeholder="`请输入 ${name}`" />
+              </div>
             </div>
           </div>
-        </div>
 
-        <div class="actions-row">
-          <el-button
-            type="primary"
-            @click="runInference"
-            :loading="inferenceRunning"
-            :disabled="!deployment.k8s_deployment_name"
-          >
-            <el-icon><Promotion /></el-icon>
-            开始推理
-          </el-button>
-          <el-button @click="refreshInferenceResult" :loading="inferenceResultLoading">
-            <el-icon><Refresh /></el-icon>
-            刷新结果
-          </el-button>
-          <el-button @click="router.push(`/deployments/${deployment.id}`)">
-            返回详情
-          </el-button>
-        </div>
+          <div class="actions-row">
+            <el-button
+              type="primary"
+              @click="runInference"
+              :loading="inferenceRunning"
+              :disabled="!deploymentReady"
+            >
+              <el-icon><Promotion /></el-icon>
+              开始运行
+            </el-button>
+            <el-button @click="refreshInferenceResult" :loading="inferenceResultLoading">
+              <el-icon><Refresh /></el-icon>
+              刷新结果
+            </el-button>
+          </div>
 
-        <div v-if="currentInferenceTaskId" class="progress-block">
-          <el-progress :percentage="inferenceProgress" :status="inferenceProgress === 100 && !inferenceError ? 'success' : ''" />
-          <div class="progress-message">{{ inferenceProgressMessage || '等待推理开始...' }}</div>
-          <el-alert
-            v-if="inferenceError"
-            :title="inferenceError"
-            type="error"
-            show-icon
-            :closable="false"
-          />
-        </div>
+          <div v-if="currentInferenceTaskId" class="progress-block">
+            <el-progress :percentage="inferenceProgress" :status="inferenceProgress === 100 && !inferenceError ? 'success' : ''" />
+            <div class="progress-message">{{ inferenceProgressMessage || '等待命令开始...' }}</div>
+            <el-alert
+              v-if="inferenceError"
+              :title="inferenceError"
+              type="error"
+              show-icon
+              :closable="false"
+            />
+          </div>
+        </PanelCard>
 
-        <div v-if="inferenceResult" class="result-block">
-          <div class="section-subtitle">最近一次推理结果</div>
+        <PanelCard
+          v-if="inferenceResult"
+          eyebrow="Result"
+          title="最近一次运行结果"
+          description="结果摘要、实时输出与文件浏览放在同一个工作台中。"
+        >
+          <template #actions>
+            <span v-if="imageFiles.length" class="badge-pill">图片 {{ loadedImageCount }}/{{ imageFiles.length }}</span>
+            <el-button
+              type="primary"
+              plain
+              :loading="downloadAllLoading"
+              :disabled="!inferenceFiles.length"
+              @click="downloadAllResultFiles"
+            >
+              下载全部结果
+            </el-button>
+          </template>
+
           <el-descriptions :column="2" border class="meta-table">
             <el-descriptions-item label="开始时间">{{ inferenceResult.started_at || '-' }}</el-descriptions-item>
             <el-descriptions-item label="结束时间">{{ inferenceResult.finished_at || '-' }}</el-descriptions-item>
             <el-descriptions-item label="退出码">{{ inferenceResult.exit_code ?? '-' }}</el-descriptions-item>
             <el-descriptions-item label="结果文件数">{{ inferenceFiles.length }}</el-descriptions-item>
           </el-descriptions>
+
+          <el-alert
+            v-if="resultAssetsLoading"
+            :title="resultAssetsMessage || '正在加载结果图片...'"
+            type="info"
+            show-icon
+            :closable="false"
+            class="workbench-alert"
+          />
+          <el-alert
+            v-else-if="imageFailureCount"
+            :title="`有 ${imageFailureCount} 张结果图片未能自动加载，可点击图片或预览按钮重试。`"
+            type="warning"
+            show-icon
+            :closable="false"
+            class="workbench-alert"
+          />
 
           <div>
             <div class="section-subtitle">实时输出</div>
@@ -109,28 +162,39 @@
             </div>
           </div>
 
+          <div v-if="imageFiles.length" class="result-gallery">
+            <div class="section-subtitle">结果图片</div>
+            <div class="result-gallery-grid">
+              <button
+                v-for="file in imageFiles"
+                :key="file.file_key"
+                type="button"
+                class="result-gallery-card"
+                @click="openImagePreview(file)"
+              >
+                <img
+                  v-if="imagePreviewCache[file.file_key]"
+                  :src="imagePreviewCache[file.file_key]"
+                  :alt="file.name"
+                  class="result-gallery-image"
+                />
+                <div v-else class="result-gallery-placeholder">
+                  {{ imagePreviewErrors[file.file_key] || (resultAssetsLoading ? '图片加载中' : '点击查看') }}
+                </div>
+                <div class="result-gallery-meta">
+                  <strong>{{ file.name }}</strong>
+                  <span>{{ formatFileSize(file.size) }}</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
           <div class="result-files">
-            <div class="section-subtitle">结果</div>
-            <el-table v-if="inferenceFiles.length" :data="inferenceFiles" size="small" stripe>
+            <div class="section-subtitle">结果文件</div>
+            <el-table v-if="documentFiles.length" :data="documentFiles" size="small" stripe>
               <el-table-column label="预览" width="100">
                 <template #default="{ row }">
-                  <img
-                    v-if="row.kind === 'image' && imagePreviewCache[row.file_key]"
-                    :src="imagePreviewCache[row.file_key]"
-                    :alt="row.name"
-                    class="result-thumbnail"
-                    @click="openImagePreview(row)"
-                  />
-                  <el-button
-                    v-else-if="row.kind === 'image'"
-                    size="small"
-                    text
-                    :loading="isImagePreviewLoading(row.file_key)"
-                    @click="loadImagePreview(row, { force: true })"
-                  >
-                    {{ getImagePreviewActionText(row.file_key) }}
-                  </el-button>
-                  <span v-else>-</span>
+                  <span>-</span>
                 </template>
               </el-table-column>
               <el-table-column prop="name" label="文件名" min-width="240" />
@@ -152,16 +216,16 @@
                 </template>
               </el-table-column>
             </el-table>
-            <el-empty v-else description="暂无结果文件" />
+            <el-empty v-else description="除图片外暂无其他结果文件" />
           </div>
-        </div>
+        </PanelCard>
       </template>
-    </el-card>
+    </template>
 
     <el-skeleton v-else :rows="8" animated />
 
     <el-dialog v-model="textPreviewVisible" title="文档预览" width="800px">
-      <pre class="document-preview">{{ textPreviewContent || '无可预览内容' }}</pre>
+      <CodeBlock :content="textPreviewContent || '无可预览内容'" terminal />
     </el-dialog>
 
     <el-dialog v-model="pdfPreviewVisible" title="PDF预览" width="900px">
@@ -180,11 +244,12 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import PageHero from '@/components/ui/PageHero.vue'
+import PanelCard from '@/components/ui/PanelCard.vue'
+import CodeBlock from '@/components/ui/CodeBlock.vue'
 import { useDeploymentsStore } from '@/stores/deployments'
-import { getDeploymentStatusText, getDeploymentStatusType } from '@/utils/formatters'
+import { getDeploymentStatusText } from '@/utils/formatters'
 import { useWebSocket } from '@/composables/useWebSocket'
-
-const PREVIEW_CONCURRENCY = 4
 
 const route = useRoute()
 const router = useRouter()
@@ -213,6 +278,10 @@ const imagePreviewCache = reactive({})
 const imagePreviewStatus = reactive({})
 const imagePreviewErrors = reactive({})
 const downloadLoading = reactive({})
+const downloadAllLoading = ref(false)
+const resultAssetsLoading = ref(false)
+const resultAssetsMessage = ref('')
+const loadedPreviewDigest = ref('')
 const previewBatchToken = ref(0)
 const imagePreviewRequests = new Map()
 
@@ -221,6 +290,19 @@ const inferenceEnabled = computed(() => Boolean(inferenceConfig.value?.enabled))
 const inferenceVariableNames = computed(() => inferenceConfig.value?.variable_names || [])
 const inferenceFiles = computed(() => inferenceResult.value?.files || [])
 const imageFiles = computed(() => inferenceFiles.value.filter((file) => file.kind === 'image'))
+const documentFiles = computed(() => inferenceFiles.value.filter((file) => file.kind !== 'image'))
+const loadedImageCount = computed(() => imageFiles.value.filter((file) => Boolean(imagePreviewCache[file.file_key])).length)
+const imageFailureCount = computed(() => imageFiles.value.filter((file) => Boolean(imagePreviewErrors[file.file_key])).length)
+const deploymentReady = computed(() => deployment.value?.status === 'running' && Boolean(deployment.value?.k8s_deployment_name))
+const lastRunStatus = computed(() => {
+  if (!inferenceResult.value?.finished_at) {
+    return '尚未运行'
+  }
+  if ((inferenceResult.value?.exit_code ?? 1) === 0) {
+    return '最近一次运行成功'
+  }
+  return '最近一次运行失败'
+})
 
 const normalizeOutputText = (text) => {
   return (text || '')
@@ -263,7 +345,9 @@ const clearImagePreviewState = () => {
   previewBatchToken.value += 1
   imagePreviewRequests.clear()
   Object.values(imagePreviewCache).forEach((url) => {
-    window.URL.revokeObjectURL(url)
+    if (typeof url === 'string' && url.startsWith('blob:')) {
+      window.URL.revokeObjectURL(url)
+    }
   })
   Object.keys(imagePreviewCache).forEach((key) => {
     delete imagePreviewCache[key]
@@ -276,6 +360,8 @@ const clearImagePreviewState = () => {
   })
   imagePreviewVisible.value = false
   imagePreviewDialogUrl.value = ''
+  loadedPreviewDigest.value = ''
+  resultAssetsMessage.value = ''
 }
 
 const getBlobContentType = (response) => {
@@ -326,21 +412,95 @@ const initInferenceVariables = () => {
   })
 }
 
-const isImagePreviewLoading = (fileKey) => {
-  return imagePreviewStatus[fileKey] === 'loading' || imagePreviewStatus[fileKey] === 'retrying'
+const getDownloadFilename = (response, fallbackName) => {
+  const disposition = response?.headers?.['content-disposition'] || response?.headers?.['Content-Disposition'] || ''
+  const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1])
+  }
+  const fallbackMatch = disposition.match(/filename="?([^"]+)"?/i)
+  if (fallbackMatch?.[1]) {
+    return fallbackMatch[1]
+  }
+  return fallbackName
 }
 
-const getImagePreviewActionText = (fileKey) => {
-  if (imagePreviewStatus[fileKey] === 'retrying') {
-    return '重试中'
+const restoreInferenceRuntime = (result) => {
+  const runtime = result?.runtime || deployment.value?.inference_runtime || {}
+  const nextTaskId = runtime.active && runtime.task_id ? runtime.task_id : ''
+
+  if (currentInferenceTaskId.value && currentInferenceTaskId.value !== nextTaskId) {
+    unsubscribe(currentInferenceTaskId.value)
   }
-  if (imagePreviewErrors[fileKey]) {
-    return '重试预览'
+
+  if (!nextTaskId) {
+    currentInferenceTaskId.value = ''
+    inferenceRunning.value = false
+    if (!inferenceError.value) {
+      inferenceProgressMessage.value = ''
+    }
+    return
   }
-  if (imagePreviewStatus[fileKey] === 'loading') {
-    return '加载中'
+
+  currentInferenceTaskId.value = nextTaskId
+  inferenceRunning.value = true
+  inferenceError.value = ''
+  inferenceProgress.value = Number(runtime.progress || 0)
+  inferenceProgressMessage.value = runtime.message || '命令运行中'
+  streamedOutput.value = Array.isArray(runtime.logs) ? runtime.logs.join('') : ''
+  subscribe(nextTaskId)
+}
+
+const loadInferenceAssets = async (result, { force = false } = {}) => {
+  if (!deployment.value) return
+
+  const resources = result?.resources || {}
+  const resultDigest = resources.result_digest || result?.result_digest || ''
+
+  if (!resources.ready || !imageFiles.value.length) {
+    resultAssetsLoading.value = false
+    resultAssetsMessage.value = ''
+    if (!imageFiles.value.length) {
+      loadedPreviewDigest.value = resultDigest
+    }
+    return
   }
-  return '加载预览'
+
+  if (!force && resultDigest && loadedPreviewDigest.value === resultDigest && loadedImageCount.value === imageFiles.value.length) {
+    return
+  }
+
+  resultAssetsLoading.value = true
+  resultAssetsMessage.value = `正在加载结果图片（0/${imageFiles.value.length}）`
+
+  try {
+    const payload = await deploymentsStore.fetchInferencePreviews(deployment.value.id)
+    const nextDigest = payload?.result_digest || resultDigest
+
+    Object.keys(imagePreviewErrors).forEach((key) => {
+      delete imagePreviewErrors[key]
+    })
+
+    ;(payload?.items || []).forEach((item) => {
+      imagePreviewCache[item.file_key] = `data:${item.media_type || 'application/octet-stream'};base64,${item.content_base64}`
+      imagePreviewStatus[item.file_key] = 'loaded'
+    })
+
+    ;(payload?.failures || []).forEach((item) => {
+      imagePreviewErrors[item.file_key] = item.detail || '图片预览失败'
+      imagePreviewStatus[item.file_key] = 'failed'
+    })
+
+    loadedPreviewDigest.value = nextDigest
+    resultAssetsMessage.value = payload?.failures?.length
+      ? `已加载 ${payload.loaded}/${payload.total} 张图片，部分文件加载失败`
+      : `已加载 ${payload.loaded}/${payload.total} 张图片`
+  } catch (error) {
+    resultAssetsMessage.value = ''
+    ElMessage.error(await extractResponseErrorMessage(error, '批量加载结果图片失败'))
+  } finally {
+    resultAssetsLoading.value = false
+  }
 }
 
 const refreshInferenceResult = async () => {
@@ -349,14 +509,15 @@ const refreshInferenceResult = async () => {
   try {
     clearImagePreviewState()
     inferenceResult.value = await deploymentsStore.fetchInferenceResult(deployment.value.id)
+    restoreInferenceRuntime(inferenceResult.value)
   } catch (error) {
-    ElMessage.error('获取推理结果失败')
+    ElMessage.error('获取运行结果失败')
   } finally {
     inferenceResultLoading.value = false
   }
 
   try {
-    await preloadImagePreviews()
+    await loadInferenceAssets(inferenceResult.value, { force: true })
   } catch (error) {
     console.error('Failed to preload inference previews:', error)
   }
@@ -378,9 +539,15 @@ const runInference = async () => {
     currentInferenceTaskId.value = task.task_id
     subscribe(task.task_id)
   } catch (error) {
+    if (error.response?.status === 409) {
+      inferenceRunning.value = false
+      await refreshInferenceResult()
+      ElMessage.warning('已有任务正在运行，已恢复当前任务状态')
+      return
+    }
     inferenceRunning.value = false
     inferenceError.value = error.response?.data?.detail || error.message
-    ElMessage.error(`启动推理失败: ${inferenceError.value}`)
+    ElMessage.error(`启动运行失败: ${inferenceError.value}`)
   }
 }
 
@@ -494,25 +661,28 @@ const downloadFile = async (file) => {
   }
 }
 
-const preloadImagePreviews = async () => {
-  if (!deployment.value) return
-  const files = imageFiles.value.filter((file) => !imagePreviewCache[file.file_key])
-  if (!files.length) return
-
-  const batchToken = previewBatchToken.value
-  let cursor = 0
-  const workerCount = Math.min(PREVIEW_CONCURRENCY, files.length)
-
-  await Promise.all(Array.from({ length: workerCount }, async () => {
-    while (cursor < files.length) {
-      if (batchToken !== previewBatchToken.value) {
-        return
-      }
-      const nextFile = files[cursor]
-      cursor += 1
-      await loadImagePreview(nextFile)
-    }
-  }))
+const downloadAllResultFiles = async () => {
+  if (!deployment.value || !inferenceFiles.value.length) return
+  downloadAllLoading.value = true
+  try {
+    const response = await deploymentsStore.downloadAllInferenceFiles(deployment.value.id)
+    const blob = createBlobFromResponse(response)
+    const objectUrl = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = getDownloadFilename(response, `${deployment.value.name || 'results'}.zip`)
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.setTimeout(() => {
+      window.URL.revokeObjectURL(objectUrl)
+    }, 1000)
+  } catch (error) {
+    ElMessage.error(await extractResponseErrorMessage(error, '下载全部结果失败'))
+  } finally {
+    downloadAllLoading.value = false
+  }
 }
 
 const resetDownloadState = () => {
@@ -524,6 +694,7 @@ const resetDownloadState = () => {
 watch(inferenceFiles, () => {
   resetDownloadState()
   if (!inferenceFiles.value.length) {
+    resultAssetsLoading.value = false
     clearImagePreviewState()
   }
 })
@@ -573,7 +744,7 @@ watch(lastMessage, async (message) => {
 
   if (message.data?.error) {
     inferenceRunning.value = false
-    inferenceError.value = message.message || '推理失败'
+    inferenceError.value = message.message || '命令运行失败'
     currentInferenceTaskId.value = ''
     await refreshInferenceResult()
     return
@@ -584,7 +755,7 @@ watch(lastMessage, async (message) => {
     inferenceError.value = ''
     currentInferenceTaskId.value = ''
     await refreshInferenceResult()
-    ElMessage.success('推理完成')
+    ElMessage.success('命令运行完成')
   }
 })
 
@@ -592,12 +763,13 @@ onMounted(async () => {
   try {
     deployment.value = await deploymentsStore.fetchDeploymentDetail(route.params.id)
     inferenceResult.value = deployment.value?.last_inference_result || null
+    restoreInferenceRuntime(inferenceResult.value)
     initInferenceVariables()
     if (deployment.value?.source_type === 'image' && deployment.value?.inference_config?.enabled) {
       await refreshInferenceResult()
     }
   } catch (error) {
-    ElMessage.error('获取推理页面失败')
+    ElMessage.error('获取命令工作台失败')
   }
 })
 
@@ -612,50 +784,28 @@ onUnmounted(() => {
 
 <style scoped>
 .deployment-inference-page {
-  padding: 0;
-}
-
-.detail-card {
-  margin-top: 20px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-}
-
-.page-title {
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.page-subtitle {
-  margin-top: 4px;
-  font-family: monospace;
-  font-size: 12px;
-  color: #909399;
-  word-break: break-all;
+  padding: 2px 0 10px;
 }
 
 .section-subtitle {
-  margin: 0 0 12px;
-  font-size: 15px;
-  font-weight: 600;
+  margin: 18px 0 12px;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ui-text-faint);
 }
 
-.config-code,
 .logs-content,
 .document-preview {
-  background: #0f172a;
-  color: #e2e8f0;
+  background: #172028;
+  color: #dce8f0;
   padding: 16px;
-  border-radius: 8px;
+  border-radius: 18px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
-  font-family: monospace;
+  font-family: var(--ui-font-mono);
 }
 
 .logs-stream {
@@ -729,14 +879,85 @@ onUnmounted(() => {
   gap: 12px;
 }
 
+.result-gallery {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.result-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 14px;
+}
+
+.result-gallery-card {
+  border: 1px solid var(--ui-border);
+  background: #fff;
+  border-radius: 14px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.result-gallery-card:hover {
+  border-color: var(--ui-accent);
+  transform: translateY(-1px);
+}
+
+.result-gallery-image,
+.result-gallery-placeholder {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  background: #f4f7f8;
+}
+
+.result-gallery-image {
+  object-fit: cover;
+  display: block;
+}
+
+.result-gallery-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  color: var(--ui-text-faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.result-gallery-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.result-gallery-meta strong {
+  font-size: 13px;
+  color: var(--ui-text);
+  word-break: break-word;
+}
+
+.result-gallery-meta span,
+.table-preview-text {
+  font-size: 12px;
+  color: var(--ui-text-faint);
+}
+
 .result-thumbnail {
   width: 56px;
   height: 56px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: 12px;
   cursor: pointer;
   display: block;
-  background: #f8fafc;
+  background: rgba(248, 249, 245, 0.92);
 }
 
 .pdf-frame {
@@ -753,6 +974,10 @@ onUnmounted(() => {
 .image-preview-dialog img {
   max-width: 100%;
   max-height: 70vh;
+}
+
+.workbench-alert {
+  margin-bottom: 14px;
 }
 
 @media (max-width: 900px) {

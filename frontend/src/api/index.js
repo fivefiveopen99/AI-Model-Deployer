@@ -48,9 +48,14 @@ export const deploymentsApi = {
     timeout: 3600000
   }),
   getInferenceResult: (id) => api.get(`/deployments/${id}/inference-result`),
+  getInferencePreviews: (id) => api.get(`/deployments/${id}/inference-previews`),
   previewInferenceFile: (id, fileKey, responseType = 'text') => api.get(
     `/deployments/${id}/inference-files/${fileKey}/preview`,
     { responseType }
+  ),
+  downloadAllInferenceFiles: (id) => api.get(
+    `/deployments/${id}/inference-files/download-all`,
+    { responseType: 'blob' }
   ),
   downloadInferenceFile: (id, fileKey) => api.get(
     `/deployments/${id}/inference-files/${fileKey}/download`,
@@ -76,6 +81,7 @@ export const systemApi = {
     headers: { 'Content-Type': 'multipart/form-data' },
     timeout: 3600000
   }),
+  stopRegistryBuild: (taskId) => api.post(`/system/registry-images/build/${taskId}/stop`),
   getLocalRegistryImagePackages: (path = '') => api.get('/system/registry-images/local-packages', {
     params: { path }
   }),

@@ -1,76 +1,131 @@
 <template>
-  <div class="deployments-page">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span>部署管理</span>
-          <div class="header-actions">
-            <el-button type="primary" @click="showCreateDialog('model')">
-              <el-icon><Plus /></el-icon>
-              部署模型
-            </el-button>
-            <el-button type="success" @click="showCreateDialog('image')">
-              <el-icon><Plus /></el-icon>
-              部署镜像
-            </el-button>
-            <el-button @click="refreshDeployments">
-              <el-icon><Refresh /></el-icon>
-              刷新
-            </el-button>
-          </div>
-        </div>
+  <div class="page-shell deployments-page">
+    <PageHero
+      eyebrow="Deployments Center"
+      title="部署管理中心"
+      description="把模型部署、镜像部署、资源配置和访问入口收敛在同一条交付路径里。"
+    >
+      <template #meta>
+        <span class="badge-pill">Total {{ deploymentsStore.total }}</span>
+        <span class="badge-pill">Running {{ runningCount }}</span>
+        <span class="badge-pill">Image {{ imageSourceCount }}</span>
+      </template>
+      <template #actions>
+        <el-button type="primary" class="hero-primary" @click="showCreateDialog('model')">
+          <el-icon><Plus /></el-icon>
+          部署模型
+        </el-button>
+        <el-button type="success" class="hero-primary" @click="showCreateDialog('image')">
+          <el-icon><Plus /></el-icon>
+          部署镜像
+        </el-button>
+        <el-button class="hero-secondary" @click="refreshDeployments">
+          <el-icon><Refresh /></el-icon>
+          刷新列表
+        </el-button>
+      </template>
+    </PageHero>
+
+    <section class="metrics-grid">
+      <MetricCard label="Total Deployments" :value="deploymentsStore.total" hint="平台当前记录的全部部署对象" tone="brand">
+        <template #icon>
+          <el-icon :size="28"><Ship /></el-icon>
+        </template>
+      </MetricCard>
+      <MetricCard label="Running" :value="runningCount" hint="已经同步为运行中的在线服务" tone="success">
+        <template #icon>
+          <el-icon :size="28"><Promotion /></el-icon>
+        </template>
+      </MetricCard>
+      <MetricCard label="Pending" :value="pendingCount" hint="已创建记录但还未开始或完成部署" tone="warning">
+        <template #icon>
+          <el-icon :size="28"><Clock /></el-icon>
+        </template>
+      </MetricCard>
+      <MetricCard label="Image Source" :value="imageSourceCount" hint="直接从 Registry 镜像创建的部署" tone="default">
+        <template #icon>
+          <el-icon :size="28"><Collection /></el-icon>
+        </template>
+      </MetricCard>
+    </section>
+
+    <PanelCard
+      eyebrow="Deployment Inventory"
+      title="所有部署"
+      description="查看状态、访问地址、扩缩容与后续操作。"
+    >
+      <template #actions>
+        <el-tag type="info" effect="plain" class="count-pill">
+          {{ deploymentsStore.total }} 个部署
+        </el-tag>
       </template>
 
-      <el-table :data="deploymentsStore.deployments" v-loading="deploymentsStore.loading" stripe>
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="部署名称" />
-        <el-table-column prop="source_type" label="来源" width="100">
+      <div class="deployments-table-shell">
+        <el-table
+          :data="deploymentsStore.deployments"
+          v-loading="deploymentsStore.loading"
+          :fit="false"
+          stripe
+          class="deployments-table"
+          empty-text=""
+        >
+          <el-table-column prop="id" label="ID" width="64" />
+          <el-table-column prop="name" label="部署名称" width="156" show-overflow-tooltip>
           <template #default="{ row }">
-            <el-tag :type="row.source_type === 'image' ? 'success' : 'primary'">
+            <div class="deployment-name-cell">
+              <strong class="deployment-name-primary" :title="row.name">{{ row.name }}</strong>
+              <span>#{{ row.id }} · {{ row.namespace }}</span>
+            </div>
+          </template>
+          </el-table-column>
+          <el-table-column prop="source_type" label="来源" width="84">
+          <template #default="{ row }">
+            <el-tag :type="row.source_type === 'image' ? 'success' : 'primary'" effect="plain">
               {{ row.source_type === 'image' ? '镜像' : '模型' }}
             </el-tag>
           </template>
-        </el-table-column>
-        <el-table-column prop="namespace" label="命名空间" width="120">
+          </el-table-column>
+          <el-table-column prop="namespace" label="命名空间" width="96">
           <template #default="{ row }">
             <el-tag type="info">{{ row.namespace }}</el-tag>
           </template>
-        </el-table-column>
-        <el-table-column prop="replicas" label="副本数" width="100">
+          </el-table-column>
+          <el-table-column prop="replicas" label="副本数" width="80">
           <template #default="{ row }">
             <el-tag>{{ row.replicas }}</el-tag>
           </template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="120">
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="96">
           <template #default="{ row }">
-            <el-tag :type="getDeploymentStatusType(row.status)">
+            <el-tag :type="getDeploymentStatusType(row.status)" effect="plain">
               {{ getDeploymentStatusText(row.status) }}
             </el-tag>
           </template>
-        </el-table-column>
-        <el-table-column prop="endpoint" label="访问地址">
+          </el-table-column>
+          <el-table-column label="访问地址" width="220" show-overflow-tooltip>
           <template #default="{ row }">
-            <span v-if="row.endpoint" class="endpoint">{{ row.endpoint }}</span>
-            <span v-else class="text-gray">未部署</span>
+            <div class="access-entry-cell">
+              <el-link
+                v-if="row.access_path"
+                type="primary"
+                class="entry-link"
+                @click="openAccessEntry(row)"
+              >
+                {{ row.access_path }}
+              </el-link>
+              <span v-else class="text-gray">未配置</span>
+            </div>
           </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
+          </el-table-column>
+          <el-table-column prop="created_at" label="创建时间" width="104">
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
           </template>
-        </el-table-column>
-        <el-table-column label="操作" width="360" fixed="right">
+          </el-table-column>
+          <el-table-column label="操作" width="220">
           <template #default="{ row }">
-            <el-button-group>
+            <div class="action-row">
               <el-button size="small" @click="viewDetail(row)">详情</el-button>
-              <el-button
-                v-if="shouldShowInferenceAction(row)"
-                size="small"
-                type="warning"
-                @click="goToInference(row)"
-              >
-                推理
-              </el-button>
               <el-button
                 v-if="shouldShowDeployAction(row)"
                 size="small"
@@ -82,12 +137,23 @@
               </el-button>
               <el-button size="small" type="primary" @click="showScaleDialog(row)">扩缩容</el-button>
               <el-button size="small" type="danger" @click="deleteDeployment(row)">删除</el-button>
-            </el-button-group>
+            </div>
           </template>
-        </el-table-column>
-      </el-table>
+          </el-table-column>
+          <template #empty>
+            <div class="deployments-empty">
+              <div class="empty-title">暂无部署</div>
+              <div class="empty-text">先选择“部署模型”或“部署镜像”，创建第一条部署记录。</div>
+              <div class="empty-actions">
+                <el-button type="primary" @click="showCreateDialog('model')">部署模型</el-button>
+                <el-button type="success" class="empty-action-success" @click="showCreateDialog('image')">部署镜像</el-button>
+              </div>
+            </div>
+          </template>
+        </el-table>
+      </div>
 
-      <div class="pagination">
+      <div v-if="deploymentsStore.total > 0" class="pagination">
         <el-pagination
           v-model:current-page="currentPage"
           v-model:page-size="pageSize"
@@ -98,7 +164,7 @@
           @current-change="handleCurrentChange"
         />
       </div>
-    </el-card>
+    </PanelCard>
 
     <!-- 部署进度对话框 -->
     <el-dialog
@@ -133,7 +199,13 @@
     </el-dialog>
 
     <!-- 创建部署对话框 -->
-    <el-dialog v-model="createDialogVisible" :title="createMode === 'image' ? '部署镜像' : '部署模型'" width="720px">
+    <el-dialog
+      v-model="createDialogVisible"
+      :title="createMode === 'image' ? '部署镜像' : '部署模型'"
+      width="720px"
+      top="6vh"
+      class="deployment-create-dialog"
+    >
       <el-form :model="form" :rules="rules" ref="formRef" label-width="100px">
         <el-form-item label="部署名称" prop="name">
           <el-input v-model="form.name" placeholder="请输入部署名称" />
@@ -163,18 +235,18 @@
             />
           </el-select>
         </el-form-item>
-        <el-form-item v-if="createMode === 'image'" label="推理配置">
+        <el-form-item v-if="createMode === 'image'" label="工作台配置">
           <div class="mount-panel">
             <div class="mount-grid">
-              <div class="resource-field inference-full-width">
-                <label>推理命令模板</label>
-                <el-input
-                  v-model="inferenceConfig.command_template"
-                  type="textarea"
-                  :rows="4"
-                  placeholder="如：python test_lora_sd.py --model_dir {{model_dir}} --position {{position}}"
-                />
-                <div class="form-tip">使用 <code v-pre>{{variable_name}}</code> 定义可变参数，详情页运行前填写变量值。</div>
+                <div class="resource-field inference-full-width">
+                  <label>命令模板</label>
+                  <el-input
+                    v-model="inferenceConfig.command_template"
+                    type="textarea"
+                    :rows="4"
+                    placeholder="如：python test_lora_sd.py --model_dir {{model_dir}} --position {{position}}"
+                  />
+                <div class="form-tip">使用 <code v-pre>{{variable_name}}</code> 定义可变参数，部署后在命令工作台中填写并运行。</div>
               </div>
               <div class="resource-field">
                 <label>结果目录</label>
@@ -274,13 +346,8 @@
                 <label>挂载类型</label>
                 <el-select v-model="mountConfig.type" @change="handleMountTypeChange">
                   <el-option label="不挂载" value="" />
-                  <el-option label="PVC" value="pvc" />
                   <el-option label="NFS" value="nfs" />
                 </el-select>
-              </div>
-              <div class="resource-field" v-if="mountConfig.type === 'pvc'">
-                <label>PVC 名称</label>
-                <el-input v-model="mountConfig.claim_name" placeholder="如：model-nfs-pvc" />
               </div>
               <div class="resource-field mount-browser-field" v-if="mountConfig.type === 'nfs'">
                 <label>NFS 目录</label>
@@ -395,6 +462,9 @@
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import PageHero from '@/components/ui/PageHero.vue'
+import MetricCard from '@/components/ui/MetricCard.vue'
+import PanelCard from '@/components/ui/PanelCard.vue'
 import { useDeploymentsStore } from '@/stores/deployments'
 import { useModelsStore } from '@/stores/models'
 import { useWebSocket } from '@/composables/useWebSocket'
@@ -444,7 +514,6 @@ const resources = reactive({
 })
 const mountConfig = reactive({
   type: '',
-  claim_name: '',
   directory: '',
   mount_path: '',
   sub_path: '',
@@ -518,6 +587,10 @@ const readyModels = computed(() => {
   return modelsStore.models.filter(m => m.status === 'ready')
 })
 
+const runningCount = computed(() => deploymentsStore.deployments.filter((deployment) => deployment.status === 'running').length)
+const pendingCount = computed(() => deploymentsStore.deployments.filter((deployment) => ['pending', 'deploying'].includes(deployment.status)).length)
+const imageSourceCount = computed(() => deploymentsStore.deployments.filter((deployment) => deployment.source_type === 'image').length)
+
 const inferenceVariableNames = computed(() => {
   const matches = inferenceConfig.command_template.matchAll(/\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g)
   const seen = new Set()
@@ -532,18 +605,8 @@ const inferenceVariableNames = computed(() => {
   return names
 })
 
-const isDeploymentReadyForInference = (deployment) => {
-  return deployment?.status === 'running' || Boolean(deployment?.endpoint)
-}
-
-const shouldShowInferenceAction = (deployment) => {
-  return deployment?.source_type === 'image'
-    && Boolean(deployment?.inference_config?.enabled)
-    && isDeploymentReadyForInference(deployment)
-}
-
 const shouldShowDeployAction = (deployment) => {
-  return !shouldShowInferenceAction(deployment)
+  return deployment?.status !== 'running' && deployment?.status !== 'deploying'
 }
 
 const loadRegistryImages = async () => {
@@ -569,7 +632,6 @@ const showCreateDialog = async (mode = 'model') => {
   resources.requests = { cpu: '', memory: '' }
   resources.gpu = { resourceName: '', count: 0 }
   mountConfig.type = ''
-  mountConfig.claim_name = ''
   mountConfig.directory = ''
   mountConfig.mount_path = ''
   mountConfig.sub_path = ''
@@ -602,9 +664,6 @@ const handleGpuTypeChange = (resourceName) => {
 }
 
 const handleMountTypeChange = (type) => {
-  if (type !== 'pvc') {
-    mountConfig.claim_name = ''
-  }
   if (type !== 'nfs') {
     mountConfig.directory = ''
     nfsServer.value = ''
@@ -680,9 +739,7 @@ const buildMountConfig = () => {
     read_only: mountConfig.read_only
   }
 
-  if (mountConfig.type === 'pvc') {
-    config.claim_name = mountConfig.claim_name
-  } else if (mountConfig.type === 'nfs') {
+  if (mountConfig.type === 'nfs') {
     config.directory = mountConfig.directory
   }
 
@@ -696,6 +753,17 @@ const submitCreate = async () => {
     if (valid) {
       submitting.value = true
       try {
+        if (createMode.value === 'image') {
+          if (!inferenceConfig.command_template.trim()) {
+            ElMessage.error('镜像部署必须填写命令模板')
+            return
+          }
+          if (!inferenceConfig.result_path.trim()) {
+            ElMessage.error('镜像部署必须填写结果目录')
+            return
+          }
+        }
+
         const envVarsObj = {}
         envVars.value.forEach(env => {
           if (env.key) {
@@ -836,8 +904,9 @@ const viewDetail = (row) => {
   router.push(`/deployments/${row.id}`)
 }
 
-const goToInference = (row) => {
-  router.push(`/deployments/${row.id}/inference`)
+const openAccessEntry = (row) => {
+  if (!row?.access_path) return
+  router.push(row.access_path)
 }
 
 const refreshDeployments = () => {
@@ -892,27 +961,98 @@ const stopPolling = () => {
 <style scoped>
 .deployments-page {
   padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
-.card-header {
+.page-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 2px 2px 0;
+}
+
+.hero-copy {
+  max-width: 520px;
+}
+
+.hero-eyebrow,
+.section-eyebrow {
+  display: inline-block;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #86868b;
+}
+
+.hero-copy h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.14;
+  letter-spacing: -0.04em;
+  color: #1d1d1f;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.hero-primary,
+.hero-secondary {
+  min-width: 112px;
+  min-height: 42px;
+  padding: 0 16px;
+}
+
+.deployments-shell :deep(.el-card__body) {
+  padding-top: 8px;
+}
+
+.shell-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-end;
+  gap: 18px;
 }
 
-.header-actions {
-  display: flex;
-  gap: 10px;
+.shell-header h2 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+}
+
+.shell-header p {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #667085;
+}
+
+.count-pill {
+  padding: 0 12px;
+  min-height: 34px;
+}
+
+.deployments-table-shell {
+  width: 100%;
+  overflow-x: auto;
 }
 
 .pagination {
-  margin-top: 20px;
+  margin-top: 18px;
   display: flex;
   justify-content: flex-end;
 }
 
 .text-gray {
-  color: #909399;
+  color: #8e8e93;
 }
 
 .form-tip {
@@ -921,10 +1061,121 @@ const stopPolling = () => {
   color: #909399;
 }
 
-.endpoint {
-  font-family: monospace;
+.deployment-name-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.deployment-name-cell strong {
+  font-size: 14px;
+  color: #1d1d1f;
+}
+
+.deployment-name-primary {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deployment-name-cell span {
   font-size: 12px;
-  color: #409EFF;
+  color: #86868b;
+}
+
+.access-entry-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.entry-link {
+  display: inline-block;
+  max-width: 100%;
+  color: #2563eb;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deployments-table {
+  min-width: 1060px;
+}
+
+.action-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.deployments-table :deep(.el-table__header th) {
+  height: 50px;
+  white-space: nowrap;
+}
+
+.deployments-table :deep(.el-table__empty-block) {
+  min-height: 220px;
+}
+
+.deployments-table :deep(.el-table__row td) {
+  height: 62px;
+  vertical-align: top;
+}
+
+.deployments-table :deep(.cell) {
+  line-height: 1.45;
+}
+
+.deployments-table :deep(.el-table__body td) {
+  padding: 14px 0;
+}
+
+.deployments-empty {
+  display: flex;
+  min-height: 220px;
+  padding: 28px 16px 20px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 12px;
+}
+
+.empty-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: #1d1d1f;
+}
+
+.empty-text {
+  max-width: 420px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: #667085;
+}
+
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+}
+
+.empty-actions :deep(.empty-action-success) {
+  color: #ffffff !important;
+  border-color: transparent !important;
+  background: linear-gradient(180deg, #34c759 0%, #2fb451 100%) !important;
+  box-shadow: 0 8px 18px rgba(47, 180, 81, 0.2);
+}
+
+.empty-actions :deep(.empty-action-success:hover),
+.empty-actions :deep(.empty-action-success:focus-visible) {
+  color: #ffffff !important;
+  background: linear-gradient(180deg, #3fd065 0%, #35bd57 100%) !important;
+  border-color: transparent !important;
 }
 
 .env-row {
@@ -1018,11 +1269,40 @@ const stopPolling = () => {
   gap: 8px;
 }
 
-.progress-error {
-  margin-top: 20px;
+@media (max-width: 900px) {
+  .deployment-create-dialog {
+    --el-dialog-margin-top: 4vh;
+  }
+
+  .page-hero,
+  .shell-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .hero-copy h1 {
+    font-size: 28px;
+  }
 }
 
 @media (max-width: 720px) {
+  .hero-actions {
+    width: 100%;
+  }
+
+  .hero-primary,
+  .hero-secondary {
+    flex: 1 1 0;
+  }
+
+  .empty-actions {
+    width: 100%;
+  }
+
+  .empty-actions :deep(.el-button) {
+    flex: 1 1 0;
+  }
+
   .resource-grid,
   .mount-grid {
     grid-template-columns: 1fr;

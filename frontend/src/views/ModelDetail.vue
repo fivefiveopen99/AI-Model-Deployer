@@ -1,59 +1,18 @@
 <template>
-  <div class="model-detail-page">
-    <el-page-header @back="$router.back()" title="模型详情" />
-    
-    <el-card v-if="model" class="detail-card">
-      <template #header>
-        <div class="card-header">
-          <span>{{ model.name }}</span>
-          <el-tag :type="getModelStatusType(model.status)">
-            {{ getModelStatusText(model.status) }}
-          </el-tag>
-        </div>
+  <div class="page-shell model-detail-page">
+    <PageHero
+      eyebrow="Model Detail"
+      :title="model?.name || '模型详情'"
+      description="查看模型来源、构建镜像、配置内容和当前状态信息。详情页保持阅读优先，不再沿用默认描述表单布局。"
+    >
+      <template #meta v-if="model">
+        <span class="badge-pill">Type {{ model.model_type || 'custom' }}</span>
+        <span class="badge-pill">Source {{ model.source_type }}</span>
+        <span class="badge-pill">Status {{ getModelStatusText(model.status) }}</span>
       </template>
-      
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="ID">{{ model.id }}</el-descriptions-item>
-        <el-descriptions-item label="模型类型">
-          <el-tag>{{ model.model_type }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="来源类型">
-          <el-tag type="info">{{ model.source_type }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ formatDate(model.created_at) }}</el-descriptions-item>
-        <el-descriptions-item label="更新时间">{{ formatDate(model.updated_at) }}</el-descriptions-item>
-        <el-descriptions-item label="Docker镜像">
-          <span v-if="model.docker_image">
-            {{ model.docker_image }}:{{ model.docker_image_tag }}
-          </span>
-          <span v-else class="text-gray">未构建</span>
-        </el-descriptions-item>
-      </el-descriptions>
-      
-      <el-divider />
-      
-      <div class="section">
-        <h4>描述</h4>
-        <p>{{ model.description || '暂无描述' }}</p>
-      </div>
-      
-      <div class="section">
-        <h4>模型路径</h4>
-        <el-input v-model="model.source_path" readonly />
-      </div>
-      
-      <div class="section">
-        <h4>配置信息</h4>
-        <pre class="config-code">{{ JSON.stringify(model.config, null, 2) }}</pre>
-      </div>
-      
-      <div class="section" v-if="model.status_message">
-        <h4>状态信息</h4>
-        <el-alert :title="model.status_message" :type="model.status === 'failed' ? 'error' : 'info'" />
-      </div>
-      
-      <div class="actions">
-        <el-button type="primary" @click="showBuildDialog" :disabled="model.status === 'building'">
+      <template #actions>
+        <el-button @click="$router.back()">返回</el-button>
+        <el-button type="primary" @click="showBuildDialog" :disabled="model?.status === 'building'">
           <el-icon><Refresh /></el-icon>
           重新构建
         </el-button>
@@ -61,27 +20,117 @@
           <el-icon><Ship /></el-icon>
           创建部署
         </el-button>
-      </div>
-    </el-card>
-    
+      </template>
+    </PageHero>
+
+    <template v-if="model">
+      <section class="metrics-grid">
+        <MetricCard label="Model ID" :value="model.id" hint="平台内部模型主键" tone="brand">
+          <template #icon>
+            <el-icon :size="28"><Key /></el-icon>
+          </template>
+        </MetricCard>
+        <MetricCard label="Status" :value="getModelStatusText(model.status)" hint="当前模型生命周期状态" tone="success">
+          <template #icon>
+            <el-icon :size="28"><CircleCheck /></el-icon>
+          </template>
+        </MetricCard>
+        <MetricCard label="Source" :value="model.source_type" hint="导入方式或资产来源" tone="warning">
+          <template #icon>
+            <el-icon :size="28"><Link /></el-icon>
+          </template>
+        </MetricCard>
+        <MetricCard
+          label="Image"
+          :value="model.docker_image ? 'Ready' : 'Pending'"
+          :hint="dockerImageRef"
+          tone="default"
+        >
+          <template #icon>
+            <el-icon :size="28"><Box /></el-icon>
+          </template>
+        </MetricCard>
+      </section>
+
+      <section class="split-detail-layout">
+        <div class="content-stack">
+          <PanelCard eyebrow="Overview" title="基础信息" description="模型来源、时间线和镜像信息。">
+            <el-descriptions :column="2" border>
+              <el-descriptions-item label="ID">{{ model.id }}</el-descriptions-item>
+              <el-descriptions-item label="模型类型">
+                <el-tag>{{ model.model_type }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="来源类型">
+                <el-tag type="info">{{ model.source_type }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="创建时间">{{ formatDate(model.created_at) }}</el-descriptions-item>
+              <el-descriptions-item label="更新时间">{{ formatDate(model.updated_at) }}</el-descriptions-item>
+              <el-descriptions-item label="Docker 镜像">
+                <span class="mono-text">{{ dockerImageRef }}</span>
+              </el-descriptions-item>
+            </el-descriptions>
+          </PanelCard>
+
+          <PanelCard eyebrow="Source" title="模型来源与描述" description="保留原始路径，便于回溯实际资产位置。">
+            <div class="field-stack">
+              <div>
+                <div class="section-heading">描述</div>
+                <p class="body-copy">{{ model.description || '暂无描述' }}</p>
+              </div>
+              <div>
+                <div class="section-heading">模型路径</div>
+                <el-input v-model="model.source_path" readonly />
+              </div>
+            </div>
+          </PanelCard>
+        </div>
+
+        <div class="content-stack">
+          <PanelCard eyebrow="Runtime" title="配置信息" description="后端识别出的模型配置和构建相关字段。">
+            <CodeBlock :content="configText" />
+          </PanelCard>
+
+          <PanelCard
+            v-if="model.status_message"
+            eyebrow="Status"
+            title="状态信息"
+            description="构建失败或进行中的补充说明。"
+          >
+            <el-alert :title="model.status_message" :type="model.status === 'failed' ? 'error' : 'info'" show-icon />
+          </PanelCard>
+        </div>
+      </section>
+    </template>
+
     <el-skeleton v-else :rows="10" animated />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import PageHero from '@/components/ui/PageHero.vue'
+import MetricCard from '@/components/ui/MetricCard.vue'
+import PanelCard from '@/components/ui/PanelCard.vue'
+import CodeBlock from '@/components/ui/CodeBlock.vue'
 import { useModelsStore } from '@/stores/models'
-import { formatDate, getModelStatusText, getModelStatusType } from '@/utils/formatters'
+import { formatDate, getModelStatusText } from '@/utils/formatters'
 
 const route = useRoute()
 const modelsStore = useModelsStore()
-
 const model = ref(null)
 
+const dockerImageRef = computed(() => {
+  if (!model.value?.docker_image) {
+    return '未构建'
+  }
+  return `${model.value.docker_image}:${model.value.docker_image_tag}`
+})
+
+const configText = computed(() => JSON.stringify(model.value?.config || {}, null, 2))
+
 const showBuildDialog = () => {
-  // 可以扩展为显示构建对话框
   ElMessage.info('构建功能在模型列表页面')
 }
 
@@ -97,42 +146,21 @@ onMounted(async () => {
 
 <style scoped>
 .model-detail-page {
-  padding: 0;
+  padding: 2px 0 10px;
 }
 
-.detail-card {
-  margin-top: 20px;
+.section-heading {
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ui-text-faint);
 }
 
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.section {
-  margin: 20px 0;
-}
-
-.section h4 {
-  margin-bottom: 10px;
-  color: #606266;
-}
-
-.config-code {
-  background-color: #f5f7fa;
-  padding: 15px;
-  border-radius: 4px;
-  overflow-x: auto;
-}
-
-.text-gray {
-  color: #909399;
-}
-
-.actions {
-  margin-top: 30px;
-  display: flex;
-  gap: 10px;
+.body-copy {
+  margin: 0;
+  line-height: 1.75;
+  color: var(--ui-text-soft);
 }
 </style>

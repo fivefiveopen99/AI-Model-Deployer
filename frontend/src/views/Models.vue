@@ -1,23 +1,60 @@
 <template>
-  <div class="models-page">
-    <el-card>
-      <template #header>
-        <div class="card-header">
-          <span>模型管理</span>
-          <div class="header-actions">
-            <el-button type="primary" @click="showCreateDialog">
-              <el-icon><Plus /></el-icon>
-              添加模型
-            </el-button>
-            <el-button @click="refreshModels">
-              <el-icon><Refresh /></el-icon>
-              刷新
-            </el-button>
-          </div>
-        </div>
+  <div class="page-shell models-page">
+    <PageHero
+      eyebrow="Model Assets"
+      title="模型管理台"
+      description="统一管理导入、上传、构建与重置状态。列表保留业务操作密度，但视觉和信息层级统一到新版控制台。"
+    >
+      <template #meta>
+        <span class="badge-pill">Total {{ modelsStore.total }}</span>
+        <span class="badge-pill">Ready {{ readyCount }}</span>
+        <span class="badge-pill">Building {{ buildingCount }}</span>
+      </template>
+      <template #actions>
+        <el-button @click="refreshModels">
+          <el-icon><Refresh /></el-icon>
+          刷新列表
+        </el-button>
+        <el-button type="primary" @click="showCreateDialog">
+          <el-icon><Plus /></el-icon>
+          添加模型
+        </el-button>
+      </template>
+    </PageHero>
+
+    <section class="metrics-grid">
+      <MetricCard label="Total Models" :value="modelsStore.total" hint="当前登记到平台的全部模型资产" tone="brand">
+        <template #icon>
+          <el-icon :size="28"><Box /></el-icon>
+        </template>
+      </MetricCard>
+      <MetricCard label="Ready" :value="readyCount" hint="构建完成且可直接创建部署" tone="success">
+        <template #icon>
+          <el-icon :size="28"><CircleCheck /></el-icon>
+        </template>
+      </MetricCard>
+      <MetricCard label="Building" :value="buildingCount" hint="包括 building 与 pushing 状态" tone="warning">
+        <template #icon>
+          <el-icon :size="28"><Loading /></el-icon>
+        </template>
+      </MetricCard>
+      <MetricCard label="Failed" :value="failedCount" hint="需要检查依赖、权重或构建日志" tone="danger">
+        <template #icon>
+          <el-icon :size="28"><Warning /></el-icon>
+        </template>
+      </MetricCard>
+    </section>
+
+    <PanelCard
+      eyebrow="Model Inventory"
+      title="模型列表"
+      description="保留模型来源、镜像状态和快捷操作，并把构建相关动作统一收敛到列表上下文。"
+    >
+      <template #actions>
+        <span class="badge-pill">Page {{ currentPage }}</span>
       </template>
 
-      <el-table :data="modelsStore.models" v-loading="modelsStore.loading" stripe>
+      <el-table :data="modelsStore.models" v-loading="modelsStore.loading" stripe class="models-table">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="模型名称" />
         <el-table-column prop="model_type" label="类型" width="120">
@@ -74,6 +111,16 @@
             </el-button-group>
           </template>
         </el-table-column>
+        <template #empty>
+          <EmptyState
+            title="模型列表为空"
+            description="导入 GitHub 仓库、上传压缩包，或手动登记外部来源后，模型会出现在这里。"
+          >
+            <template #actions>
+              <el-button type="primary" @click="showCreateDialog">添加模型</el-button>
+            </template>
+          </EmptyState>
+        </template>
       </el-table>
 
       <div class="pagination">
@@ -87,7 +134,7 @@
           @current-change="handleCurrentChange"
         />
       </div>
-    </el-card>
+    </PanelCard>
 
     <!-- 上传进度对话框 -->
     <el-dialog
@@ -169,10 +216,10 @@
     </el-dialog>
 
     <!-- 最小化构建进度悬浮按钮 -->
-    <div v-if="buildStore.isProgressMinimized && buildStore.building" class="minimized-progress" @click="restoreProgress">
-      <div class="minimized-content">
+    <div v-if="buildStore.isProgressMinimized && buildStore.building" class="floating-progress" @click="restoreProgress">
+      <div class="floating-progress__content">
         <el-icon class="is-loading"><Loading /></el-icon>
-        <span class="minimized-text">构建中 {{ buildStore.buildProgress }}%</span>
+        <span class="floating-progress__text">构建中 {{ buildStore.buildProgress }}%</span>
         <el-progress
           :percentage="buildStore.buildProgress"
           :show-text="false"
@@ -294,10 +341,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, reactive, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Loading, ArrowDown, CircleClose } from '@element-plus/icons-vue'
+import { Plus, Refresh, Loading, ArrowDown, CircleClose, Box, CircleCheck, Warning } from '@element-plus/icons-vue'
+import PageHero from '@/components/ui/PageHero.vue'
+import MetricCard from '@/components/ui/MetricCard.vue'
+import PanelCard from '@/components/ui/PanelCard.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
 import { useModelsStore } from '@/stores/models'
 import { useBuildStore } from '@/stores/build'
 import { useWebSocket } from '@/composables/useWebSocket'
@@ -319,6 +370,9 @@ const activeTab = ref('github')
 const uploadRef = ref(null)
 const selectedFile = ref(null)
 const buildLogRef = ref(null)
+const readyCount = computed(() => modelsStore.models.filter((row) => row.status === 'ready').length)
+const buildingCount = computed(() => modelsStore.models.filter((row) => ['building', 'pushing'].includes(row.status)).length)
+const failedCount = computed(() => modelsStore.models.filter((row) => row.status === 'failed').length)
 
 // 上传进度条相关
 const uploadProgress = ref(0)
@@ -782,87 +836,29 @@ onUnmounted(() => {
 
 <style scoped>
 .models-page {
-  padding: 0;
+  padding: 2px 0 10px;
 }
 
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header-actions {
-  display: flex;
-  gap: 10px;
+.models-table {
+  width: 100%;
 }
 
 .pagination {
-  margin-top: 20px;
+  margin-top: 18px;
   display: flex;
   justify-content: flex-end;
 }
 
 .text-gray {
-  color: #909399;
+  color: var(--ui-text-faint);
 }
 
 .form-tip {
-  font-size: 12px;
-  color: #909399;
-  margin-top: 5px;
-}
-
-.progress-content {
-  padding: 20px 0;
-}
-
-.progress-message {
-  margin-top: 20px;
-  text-align: center;
-  color: #606266;
-  font-size: 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.progress-error {
-  margin-top: 20px;
+  margin-top: 6px;
 }
 
 .build-log-section {
-  margin-top: 20px;
-  border: 1px solid #dcdfe6;
-  border-radius: 6px;
-  overflow: hidden;
-  background: #1f2329;
-}
-
-.build-log-header {
-  height: 36px;
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #f5f7fa;
-  border-bottom: 1px solid #dcdfe6;
-  color: #303133;
-  font-size: 13px;
-}
-
-.build-log-content {
-  height: 280px;
-  margin: 0;
-  padding: 12px;
-  overflow: auto;
-  color: #d7dde8;
-  background: #1f2329;
-  font-family: Consolas, Monaco, 'Courier New', monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-word;
+  margin-top: 4px;
 }
 
 .dialog-footer {
@@ -871,46 +867,35 @@ onUnmounted(() => {
   gap: 10px;
 }
 
-/* 最小化进度悬浮窗 */
-.minimized-progress {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  background: linear-gradient(135deg, #409eff 0%, #66b1ff 100%);
-  border-radius: 12px;
-  padding: 12px 20px;
-  box-shadow: 0 4px 20px rgba(64, 158, 255, 0.4);
-  cursor: pointer;
-  z-index: 9999;
-  transition: all 0.3s ease;
-  min-width: 180px;
-}
-
-.minimized-progress:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 25px rgba(64, 158, 255, 0.5);
-}
-
-.minimized-content {
+.build-log-header {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 8px;
-  color: white;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 0 14px;
+  font-size: 12px;
+  color: var(--ui-text-soft);
+  border: 1px solid rgba(29, 44, 53, 0.08);
+  border-bottom: 0;
+  border-radius: 18px 18px 0 0;
+  background: rgba(249, 250, 246, 0.96);
 }
 
-.minimized-text {
-  font-size: 14px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-
-.minimized-bar {
-  width: 100%;
-}
-
-.minimized-bar :deep(.el-progress-bar__outer) {
-  background-color: rgba(255, 255, 255, 0.3);
+.build-log-content {
+  height: 280px;
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  color: #d7dde8;
+  background: #172028;
+  font-family: var(--ui-font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid rgba(29, 44, 53, 0.08);
+  border-top: 0;
+  border-radius: 0 0 18px 18px;
 }
 
 .minimized-bar :deep(.el-progress-bar__inner) {

@@ -9,7 +9,7 @@ import uuid
 
 from app.models.database import get_db, AIModel, Deployment, DeployStatus
 from app.models.schemas import SystemStatus, BuildResponse
-from app.services.docker_service import docker_service
+from app.services.docker_service import docker_service, DockerTaskCancelledError
 from app.services.k8s_service import k8s_service
 from app.services.nfs_service import (
     NFSDiscoveryError,
@@ -58,7 +58,6 @@ async def health_check():
         "docker": docker_service.is_connected,
         "kubernetes": k8s_connected
     }
-
 
 @router.get("/nfs/directories")
 async def list_nfs_directories(path: str = ""):
@@ -195,6 +194,7 @@ async def build_registry_image(
         raise HTTPException(status_code=503, detail="Docker service not available")
 
     task_id = f"registry-build-{uuid.uuid4().hex[:12]}"
+    docker_service.register_cancelable_task(task_id)
     background_tasks.add_task(
         run_registry_build_task,
         task_id=task_id,
@@ -205,6 +205,23 @@ async def build_registry_image(
         task_id=task_id,
         message="Registry image build task started, please check progress via WebSocket"
     )
+
+
+@router.post("/registry-images/build/{task_id}/stop")
+async def stop_registry_build(task_id: str):
+    """停止手动构建镜像任务。"""
+    if not task_id.startswith("registry-build-"):
+        raise HTTPException(status_code=400, detail="Invalid registry build task id")
+
+    if not docker_service.has_cancelable_task(task_id):
+        raise HTTPException(status_code=404, detail="Registry build task not found")
+
+    stopped = await docker_service.cancel_task(task_id)
+    return {
+        "message": "Registry build stop requested",
+        "task_id": task_id,
+        "stopped_processes": stopped
+    }
 
 
 async def run_registry_build_task(task_id: str, dockerfile_content: str):
@@ -226,19 +243,54 @@ async def run_registry_build_task(task_id: str, dockerfile_content: str):
                     "dockerfile_content": dockerfile_content
                 }
             },
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            task_id=task_id
         )
 
         await progress_callback(85, "Build completed, publishing image to registry...")
 
         push_result = await docker_service.push_image_to_registry(
             build_result["image_tag"],
-            progress_callback=progress_callback
+            progress_callback=progress_callback,
+            task_id=task_id
         )
         registry_image = push_result["registry_image"]
+        docker_service._raise_if_task_cancelled(task_id)
         await progress_callback(100, "Build and registry push completed!", {
             "registry_image": registry_image,
             "image_tag": build_result["image_tag"]
         })
+    except DockerTaskCancelledError:
+        await manager.send_progress(task_id, 0, "构建已停止", {"error": True, "cancelled": True})
     except Exception as e:
         await manager.send_progress(task_id, 0, f"Build failed: {str(e)}", {"error": True})
+    finally:
+        docker_service.unregister_cancelable_task(task_id)
+
+
+@router.get("/build-nodes")
+async def get_build_nodes():
+    """获取可选构建节点，默认包含本机。"""
+    nodes = [
+        {
+            "name": "local",
+            "display_name": "本机",
+            "type": "local",
+            "internal_ip": None
+        }
+    ]
+
+    k8s_connected = await k8s_service.check_connection_async()
+    if not k8s_connected:
+        return {"items": nodes}
+
+    worker_nodes = await k8s_service.get_worker_nodes()
+    for node in worker_nodes:
+        nodes.append({
+            "name": node["name"],
+            "display_name": f"{node['name']} ({node.get('internal_ip') or 'no-ip'})",
+            "type": "k8s-worker",
+            "internal_ip": node.get("internal_ip")
+        })
+
+    return {"items": nodes}

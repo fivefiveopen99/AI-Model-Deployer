@@ -140,6 +140,8 @@ class K8sService:
         resources = resources or {}
         env_vars = env_vars or {}
         mount_config = mount_config or {}
+        if mount_config.get("enabled") and mount_config.get("type") not in {"nfs", ""}:
+            raise Exception("Only NFS mounts are supported")
         create_service = source_type != "image"
         
         name_suffix = deployment_name.lower().replace(' ', '-')
@@ -305,15 +307,7 @@ class K8sService:
                 sub_path=sub_path
             ))
 
-            if mount_config.get("type") == "pvc":
-                volumes.append(client.V1Volume(
-                    name=volume_name,
-                    persistent_volume_claim=client.V1PersistentVolumeClaimVolumeSource(
-                        claim_name=mount_config["claim_name"],
-                        read_only=read_only
-                    )
-                ))
-            elif mount_config.get("type") == "nfs":
+            if mount_config.get("type") == "nfs":
                 volumes.append(client.V1Volume(
                     name=volume_name,
                     nfs=client.V1NFSVolumeSource(

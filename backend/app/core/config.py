@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     
     # Docker Registry Configuration
+    LOCAL_IMAGE_PATH: str = "./data/images"
     DOCKER_REGISTRY_URL: str = "10.10.25.69:5000/ai-models"
     DOCKER_REGISTRY_PUSH_URL: Optional[str] = "localhost:5000/ai-models"
     DOCKER_REGISTRY_USERNAME: str = ""
@@ -49,4 +50,5 @@ settings = Settings()
 
 os.makedirs(settings.MODEL_STORAGE_PATH, exist_ok=True)
 os.makedirs(settings.BUILD_CONTEXT_PATH, exist_ok=True)
+os.makedirs(settings.LOCAL_IMAGE_PATH, exist_ok=True)
 os.makedirs(settings.LOCAL_IMAGE_ARCHIVE_PATH, exist_ok=True)

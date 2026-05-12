@@ -1,151 +1,29 @@
 <template>
-  <div class="deployment-detail-page">
-    <el-page-header @back="$router.back()" title="部署详情" />
-
-    <el-card v-if="deployment" class="detail-card">
-      <template #header>
-        <div class="card-header">
-          <span>{{ deployment.name }}</span>
-          <el-tag :type="getDeploymentStatusType(deployment.status)">
-            {{ getDeploymentStatusText(deployment.status) }}
-          </el-tag>
-        </div>
+  <div class="page-shell deployment-detail-page">
+    <PageHero
+      eyebrow="Deployment Detail"
+      :title="deployment?.name || '部署详情'"
+      description="统一查看部署来源、资源配置、Kubernetes 运行态和访问入口，同时把高频动作收敛到页头。"
+    >
+      <template #meta v-if="deployment">
+        <span class="badge-pill">Namespace {{ deployment.namespace }}</span>
+        <span class="badge-pill">Status {{ getDeploymentStatusText(deployment.status) }}</span>
+        <span class="badge-pill">Replicas {{ deployment.replicas }}</span>
       </template>
-
-      <el-descriptions :column="2" border>
-        <el-descriptions-item label="ID">{{ deployment.id }}</el-descriptions-item>
-        <el-descriptions-item label="部署来源">
-          <el-tag :type="deployment.source_type === 'image' ? 'success' : 'primary'">
-            {{ deployment.source_type === 'image' ? '镜像' : '模型' }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item v-if="deployment.source_type === 'model'" label="模型ID">
-          <el-button link @click="$router.push(`/models/${deployment.model_id}`)">
-            {{ deployment.model_id }}
-          </el-button>
-        </el-descriptions-item>
-        <el-descriptions-item v-else label="镜像">
-          <span class="image-ref">{{ deployment.image || '-' }}</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="命名空间">
-          <el-tag type="info">{{ deployment.namespace }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="副本数">
-          <el-tag>{{ deployment.replicas }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item v-if="deployment.source_type === 'model'" label="服务端口">
-          {{ deployment.port }}
-        </el-descriptions-item>
-        <el-descriptions-item label="创建时间">{{ formatDate(deployment.created_at) }}</el-descriptions-item>
-        <el-descriptions-item label="更新时间">{{ formatDate(deployment.updated_at) }}</el-descriptions-item>
-      </el-descriptions>
-
-      <el-divider />
-
-      <div class="section" v-if="deployment.endpoint">
-        <h4>访问地址</h4>
-        <el-input :model-value="deployment.endpoint" readonly>
-          <template #append>
-            <el-button @click="copyEndpoint">
-              <el-icon><CopyDocument /></el-icon>
-            </el-button>
-          </template>
-        </el-input>
-      </div>
-
-      <div class="section" v-if="deployment.k8s_deployment_name">
-        <h4>Kubernetes信息</h4>
-        <el-descriptions :column="1" border>
-          <el-descriptions-item label="Deployment名称">
-            {{ deployment.k8s_deployment_name }}
-          </el-descriptions-item>
-          <el-descriptions-item v-if="deployment.k8s_service_name" label="Service名称">
-            {{ deployment.k8s_service_name }}
-          </el-descriptions-item>
-        </el-descriptions>
-      </div>
-
-      <div class="section">
-        <h4>资源配置</h4>
-        <pre class="config-code">{{ JSON.stringify(deployment.resources || {}, null, 2) }}</pre>
-      </div>
-
-      <div class="section">
-        <h4>挂载配置</h4>
-        <pre class="config-code">{{ JSON.stringify(deployment.mount_config || {}, null, 2) }}</pre>
-      </div>
-
-      <div class="section">
-        <h4>环境变量</h4>
-        <pre class="config-code">{{ JSON.stringify(deployment.env_vars || {}, null, 2) }}</pre>
-      </div>
-
-      <div class="section" v-if="deployment.source_type === 'image'">
-        <h4>推理配置</h4>
-        <el-alert
-          v-if="!inferenceEnabled"
-          title="该部署未配置推理命令"
-          type="warning"
-          :closable="false"
-          show-icon
-        />
-        <div v-else class="inference-summary">
-          <el-descriptions :column="1" border>
-            <el-descriptions-item label="推理命令模板">
-              <pre class="config-code compact">{{ deployment.inference_config.command_template }}</pre>
-            </el-descriptions-item>
-            <el-descriptions-item label="结果目录">
-              {{ deployment.inference_config.result_path }}
-            </el-descriptions-item>
-          </el-descriptions>
-        </div>
-      </div>
-
-      <div class="section" v-if="deployment.status_message">
-        <h4>状态信息</h4>
-        <el-alert :title="deployment.status_message" :type="deployment.status === 'failed' ? 'error' : 'info'" />
-      </div>
-
-      <el-divider />
-
-      <div class="section">
-        <h4>Pod日志</h4>
-        <div class="logs-header">
-          <el-input-number v-model="tailLines" :min="10" :max="1000" :step="10" size="small" />
-          <el-button size="small" @click="fetchLogs" :loading="logsLoading">
-            <el-icon><Refresh /></el-icon>
-            刷新日志
-          </el-button>
-        </div>
-        <pre class="logs-content" v-loading="logsLoading">{{ logs || '暂无日志' }}</pre>
-      </div>
-
-      <div class="actions">
+      <template #actions>
+        <el-button @click="$router.back()">返回</el-button>
         <el-button
           v-if="showDeployAction"
           type="success"
           @click="deployToK8s"
-          :disabled="deployment.status === 'running' || deployment.status === 'deploying'"
+          :disabled="deployment?.status === 'running' || deployment?.status === 'deploying'"
         >
           <el-icon><Ship /></el-icon>
-          部署到K8s
+          部署到 K8s
         </el-button>
-        <el-button
-          v-if="showInferenceAction"
-          type="warning"
-          @click="goToInference"
-        >
+        <el-button v-if="deployment?.access_path" @click="openAccessEntry">
           <el-icon><Promotion /></el-icon>
-          推理
-        </el-button>
-        <el-button
-          v-if="deployment.source_type === 'model'"
-          type="primary"
-          @click="goToPlayground"
-          :disabled="!deployment.endpoint"
-        >
-          <el-icon><ChatLineRound /></el-icon>
-          交互测试
+          打开页面
         </el-button>
         <el-button type="primary" @click="showScaleDialog">
           <el-icon><ScaleToOriginal /></el-icon>
@@ -155,12 +33,172 @@
           <el-icon><Refresh /></el-icon>
           刷新状态
         </el-button>
-      </div>
-    </el-card>
+      </template>
+    </PageHero>
+
+    <template v-if="deployment">
+      <section class="metrics-grid">
+        <MetricCard label="Deployment ID" :value="deployment.id" hint="平台内部部署主键" tone="brand">
+          <template #icon>
+            <el-icon :size="28"><Key /></el-icon>
+          </template>
+        </MetricCard>
+        <MetricCard
+          label="Source"
+          :value="deployment.source_type === 'image' ? '镜像' : '模型'"
+          hint="决定部署来源和运行配置结构"
+          tone="success"
+        >
+          <template #icon>
+            <el-icon :size="28"><Collection /></el-icon>
+          </template>
+        </MetricCard>
+        <MetricCard label="Replicas" :value="deployment.replicas" hint="当前数据库中的目标副本数" tone="warning">
+          <template #icon>
+            <el-icon :size="28"><Grid /></el-icon>
+          </template>
+        </MetricCard>
+        <MetricCard
+          label="Endpoint"
+          :value="deployment.endpoint ? 'Ready' : 'Pending'"
+          :hint="deployment.endpoint || deployment.access_path || '尚未生成访问地址'"
+          tone="default"
+        >
+          <template #icon>
+            <el-icon :size="28"><Connection /></el-icon>
+          </template>
+        </MetricCard>
+      </section>
+
+      <section class="split-detail-layout">
+        <div class="content-stack">
+          <PanelCard eyebrow="Overview" title="基础信息" description="部署来源、命名空间、副本数和创建时间。">
+            <el-descriptions :column="2" border>
+              <el-descriptions-item label="ID">{{ deployment.id }}</el-descriptions-item>
+              <el-descriptions-item label="部署来源">
+                <el-tag :type="deployment.source_type === 'image' ? 'success' : 'primary'">
+                  {{ deployment.source_type === 'image' ? '镜像' : '模型' }}
+                </el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item v-if="deployment.source_type === 'model'" label="模型 ID">
+                <el-button link @click="$router.push(`/models/${deployment.model_id}`)">
+                  {{ deployment.model_id }}
+                </el-button>
+              </el-descriptions-item>
+              <el-descriptions-item v-else label="镜像">
+                <span class="mono-text">{{ deployment.image || '-' }}</span>
+              </el-descriptions-item>
+              <el-descriptions-item label="命名空间">
+                <el-tag type="info">{{ deployment.namespace }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item label="副本数">
+                <el-tag>{{ deployment.replicas }}</el-tag>
+              </el-descriptions-item>
+              <el-descriptions-item v-if="deployment.source_type === 'model'" label="服务端口">
+                {{ deployment.port }}
+              </el-descriptions-item>
+              <el-descriptions-item label="创建时间">{{ formatDate(deployment.created_at) }}</el-descriptions-item>
+              <el-descriptions-item label="更新时间">{{ formatDate(deployment.updated_at) }}</el-descriptions-item>
+            </el-descriptions>
+          </PanelCard>
+
+          <PanelCard eyebrow="Routing" title="访问与服务入口" description="统一放置页面访问地址和服务端点。">
+            <div class="field-stack">
+              <div v-if="deployment.access_path">
+                <div class="section-heading">访问地址</div>
+                <el-link type="primary" class="entry-link" @click="openAccessEntry">
+                  {{ accessEntryUrl }}
+                </el-link>
+              </div>
+              <div v-if="deployment.endpoint">
+                <div class="section-heading">服务端点</div>
+                <el-input :model-value="deployment.endpoint" readonly>
+                  <template #append>
+                    <el-button @click="copyEndpoint">
+                      <el-icon><CopyDocument /></el-icon>
+                    </el-button>
+                  </template>
+                </el-input>
+              </div>
+              <div v-if="deployment.k8s_deployment_name">
+                <div class="section-heading">Kubernetes 对象</div>
+                <el-descriptions :column="1" border>
+                  <el-descriptions-item label="Deployment 名称">
+                    {{ deployment.k8s_deployment_name }}
+                  </el-descriptions-item>
+                  <el-descriptions-item v-if="deployment.k8s_service_name" label="Service 名称">
+                    {{ deployment.k8s_service_name }}
+                  </el-descriptions-item>
+                </el-descriptions>
+              </div>
+            </div>
+          </PanelCard>
+
+          <PanelCard eyebrow="Logs" title="Pod 日志" description="直接查看当前部署的日志输出。">
+            <div class="logs-header">
+              <el-input-number v-model="tailLines" :min="10" :max="1000" :step="10" size="small" />
+              <el-button size="small" @click="fetchLogs" :loading="logsLoading">
+                <el-icon><Refresh /></el-icon>
+                刷新日志
+              </el-button>
+            </div>
+            <CodeBlock :content="logs || '暂无日志'" terminal />
+          </PanelCard>
+        </div>
+
+        <div class="content-stack">
+          <PanelCard eyebrow="Runtime" title="资源配置" description="部署时写入的资源请求与限制。">
+            <CodeBlock :content="resourcesText" />
+          </PanelCard>
+
+          <PanelCard eyebrow="Storage" title="挂载配置" description="NFS 或其他挂载结构。">
+            <CodeBlock :content="mountText" />
+          </PanelCard>
+
+          <PanelCard eyebrow="Environment" title="环境变量" description="传递到容器运行时的环境变量。">
+            <CodeBlock :content="envText" />
+          </PanelCard>
+
+          <PanelCard
+            v-if="deployment.source_type === 'image'"
+            eyebrow="Workbench"
+            title="命令工作台配置"
+            description="镜像部署下可选的命令模板和结果目录。"
+          >
+            <el-alert
+              v-if="!inferenceEnabled"
+              title="该部署未配置命令运行参数"
+              type="warning"
+              :closable="false"
+              show-icon
+            />
+            <div v-else class="field-stack">
+              <div>
+                <div class="section-heading">命令模板</div>
+                <CodeBlock :content="deployment.inference_config.command_template" />
+              </div>
+              <div>
+                <div class="section-heading">结果目录</div>
+                <span class="mono-text">{{ deployment.inference_config.result_path }}</span>
+              </div>
+            </div>
+          </PanelCard>
+
+          <PanelCard
+            v-if="deployment.status_message"
+            eyebrow="Status"
+            title="状态信息"
+            description="部署阶段的错误或附加提示。"
+          >
+            <el-alert :title="deployment.status_message" :type="deployment.status === 'failed' ? 'error' : 'info'" show-icon />
+          </PanelCard>
+        </div>
+      </section>
+    </template>
 
     <el-skeleton v-else :rows="10" animated />
 
-    <el-dialog v-model="scaleDialogVisible" title="扩缩容" width="400px">
+    <el-dialog v-model="scaleDialogVisible" title="扩缩容" width="420px">
       <div class="scale-content">
         <p>当前副本数: <strong>{{ deployment?.replicas }}</strong></p>
         <el-form-item label="新副本数">
@@ -179,8 +217,12 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import PageHero from '@/components/ui/PageHero.vue'
+import MetricCard from '@/components/ui/MetricCard.vue'
+import PanelCard from '@/components/ui/PanelCard.vue'
+import CodeBlock from '@/components/ui/CodeBlock.vue'
 import { useDeploymentsStore } from '@/stores/deployments'
-import { formatDate, getDeploymentStatusText, getDeploymentStatusType } from '@/utils/formatters'
+import { formatDate, getDeploymentStatusText } from '@/utils/formatters'
 
 const route = useRoute()
 const router = useRouter()
@@ -196,15 +238,15 @@ const scaleReplicas = ref(1)
 const scaling = ref(false)
 
 const inferenceEnabled = computed(() => Boolean(deployment.value?.inference_config?.enabled))
-const isDeploymentReadyForInference = computed(() => {
-  return deployment.value?.status === 'running' || Boolean(deployment.value?.endpoint)
+const accessEntryUrl = computed(() => {
+  if (!deployment.value?.access_path) return ''
+  const origin = window.location.origin.replace(/\/$/, '')
+  return `${origin}${deployment.value.access_path}`
 })
-const showInferenceAction = computed(() => {
-  return deployment.value?.source_type === 'image'
-    && inferenceEnabled.value
-    && isDeploymentReadyForInference.value
-})
-const showDeployAction = computed(() => !showInferenceAction.value)
+const showDeployAction = computed(() => deployment.value?.status !== 'running' && deployment.value?.status !== 'deploying')
+const resourcesText = computed(() => JSON.stringify(deployment.value?.resources || {}, null, 2))
+const mountText = computed(() => JSON.stringify(deployment.value?.mount_config || {}, null, 2))
+const envText = computed(() => JSON.stringify(deployment.value?.env_vars || {}, null, 2))
 
 const copyEndpoint = () => {
   if (!deployment.value?.endpoint) return
@@ -271,14 +313,9 @@ const submitScale = async () => {
   }
 }
 
-const goToPlayground = () => {
-  if (!deployment.value) return
-  router.push(`/deployments/${deployment.value.id}/playground`)
-}
-
-const goToInference = () => {
-  if (!deployment.value) return
-  router.push(`/deployments/${deployment.value.id}/inference`)
+const openAccessEntry = () => {
+  if (!deployment.value?.access_path) return
+  router.push(deployment.value.access_path)
 }
 
 onMounted(async () => {
@@ -295,69 +332,29 @@ onMounted(async () => {
 
 <style scoped>
 .deployment-detail-page {
-  padding: 0;
+  padding: 2px 0 10px;
 }
 
-.detail-card {
-  margin-top: 20px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.section {
-  margin-bottom: 24px;
-}
-
-.section h4 {
-  margin: 0 0 12px;
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.config-code,
-.logs-content {
-  background: #0f172a;
-  color: #e2e8f0;
-  padding: 16px;
-  border-radius: 8px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  font-family: monospace;
-}
-
-.config-code.compact {
-  margin: 0;
-  padding: 12px;
-}
-
-.image-ref {
-  font-family: monospace;
+.section-heading {
+  margin-bottom: 8px;
   font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ui-text-faint);
 }
 
-.logs-header {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.actions {
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
+.entry-link {
+  font-family: var(--ui-font-mono);
+  font-size: 13px;
+  word-break: break-all;
 }
 
 .scale-content {
-  padding: 20px 0;
+  padding: 12px 0 4px;
 }
 
 .scale-content p {
-  margin-bottom: 15px;
+  margin: 0 0 14px;
 }
 </style>

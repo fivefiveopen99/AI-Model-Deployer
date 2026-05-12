@@ -157,6 +157,14 @@ export const useRegistryBuildStore = defineStore('registryBuild', () => {
     clearPersistedState()
   }
 
+  const stopBuild = () => {
+    building.value = false
+    buildError.value = '构建已停止'
+    isProgressMinimized.value = false
+    progressDialogVisible.value = true
+    persistState()
+  }
+
   return {
     building,
     buildProgress,
@@ -181,6 +189,7 @@ export const useRegistryBuildStore = defineStore('registryBuild', () => {
     minimizeProgress,
     restoreProgress,
     closeProgress,
-    resetBuild
+    resetBuild,
+    stopBuild
   }
 })

@@ -1,10 +1,13 @@
 import asyncio
+import base64
+import io
+import zipfile
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse, PlainTextResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from urllib.parse import urlparse
 
 from app.models.database import get_db, AIModel, Deployment, DeployStatus, ModelStatus, async_session_maker
@@ -53,13 +56,58 @@ def _has_active_inference_task(deployment_id: int) -> bool:
     return True
 
 
+def _get_inference_runtime_status(deployment_id: int) -> Dict[str, Any]:
+    from app.core.websocket import manager
+
+    task_id = f"infer-{deployment_id}"
+    active = _has_active_inference_task(deployment_id)
+    if not active:
+        return {
+            "active": False,
+            "task_id": "",
+            "progress": 0,
+            "message": "",
+            "logs": []
+        }
+
+    latest = manager.latest_progress.get(task_id) or {}
+    return {
+        "active": True,
+        "task_id": task_id,
+        "progress": int(latest.get("progress") or 0),
+        "message": latest.get("message") or "",
+        "logs": list((manager.task_logs.get(task_id) or [])[-1000:])
+    }
+
+
+def _serialize_inference_result_payload(result_data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    payload = dict(result_data or build_empty_inference_result())
+    files = list(payload.get("files") or [])
+    payload["files"] = files
+    payload["resources"] = {
+        "ready": bool(payload.get("finished_at")),
+        "file_count": len(files),
+        "image_count": len([item for item in files if item.get("kind") == "image"]),
+        "result_digest": payload.get("result_digest") or ""
+    }
+    return payload
+
+
 def serialize_deployment(deployment: Deployment) -> Dict[str, Any]:
+    source_type = (deployment.source_type or "model").strip().lower()
+    access_mode = "command_ui" if source_type == "image" else "service"
+    access_path = f"/deployments/{deployment.id}/inference" if source_type == "image" else f"/deployments/{deployment.id}/playground"
+    access_label = "命令运行" if source_type == "image" else "交互测试"
+
     return {
         "id": deployment.id,
         "name": deployment.name,
         "model_id": deployment.model_id,
-        "source_type": deployment.source_type or "model",
+        "source_type": source_type,
         "image": deployment.image,
+        "access_mode": access_mode,
+        "access_path": access_path,
+        "access_label": access_label,
         "port": deployment.port or 8000,
         "namespace": deployment.namespace,
         "replicas": deployment.replicas,
@@ -67,8 +115,9 @@ def serialize_deployment(deployment: Deployment) -> Dict[str, Any]:
         "env_vars": deployment.env_vars or {},
         "mount_config": deployment.mount_config or {},
         "command": deployment.command,
-        "inference_config": normalize_inference_config(deployment.source_type, deployment.inference_config),
-        "last_inference_result": deployment.last_inference_result or build_empty_inference_result(),
+        "inference_config": normalize_inference_config(deployment.source_type, deployment.inference_config, deployment.mount_config),
+        "last_inference_result": _serialize_inference_result_payload(deployment.last_inference_result),
+        "inference_runtime": _get_inference_runtime_status(deployment.id),
         "status": deployment.status.value if hasattr(deployment.status, "value") else deployment.status,
         "status_message": deployment.status_message,
         "k8s_deployment_name": deployment.k8s_deployment_name,
@@ -116,12 +165,7 @@ def normalize_mount_config(mount_config: Optional[Dict[str, Any]]) -> Dict[str, 
         "read_only": bool(config.get("read_only"))
     }
 
-    if mount_type == "pvc":
-        claim_name = (config.get("claim_name") or "").strip()
-        if not claim_name:
-            raise HTTPException(status_code=400, detail="PVC claim name is required")
-        normalized["claim_name"] = claim_name
-    elif mount_type == "nfs":
+    if mount_type == "nfs":
         directory = (config.get("directory") or "").strip().strip("/")
         if not directory:
             raise HTTPException(status_code=400, detail="NFS directory is required")
@@ -134,7 +178,7 @@ def normalize_mount_config(mount_config: Optional[Dict[str, Any]]) -> Dict[str, 
         normalized["directory"] = directory
         normalized["path"] = f"{export_root}/{directory}" if directory else export_root
     else:
-        raise HTTPException(status_code=400, detail="Unsupported mount type")
+        raise HTTPException(status_code=400, detail="Only NFS mounts are supported")
 
     return normalized
 
@@ -151,7 +195,7 @@ async def create_deployment(
     image = deployment.image.strip() if deployment.image else None
     port = deployment.port
     mount_config = normalize_mount_config(deployment.mount_config)
-    inference_config = normalize_inference_config(source_type, deployment.inference_config)
+    inference_config = normalize_inference_config(source_type, deployment.inference_config, mount_config)
 
     if source_type == "model":
         if not deployment.model_id:
@@ -178,6 +222,11 @@ async def create_deployment(
     elif source_type == "image":
         if not image:
             raise HTTPException(status_code=400, detail="Image is required")
+        if not inference_config.get("enabled"):
+            raise HTTPException(
+                status_code=400,
+                detail="Image deployments require both inference_config.command_template and inference_config.result_path"
+            )
         image = normalize_registry_image(image)
         port = 8000
     else:
@@ -398,7 +447,7 @@ async def get_deployment(deployment_id: int, db: AsyncSession = Depends(get_db))
 
 
 def _get_deployment_inference_config(deployment: Deployment) -> Dict[str, Any]:
-    config = normalize_inference_config(deployment.source_type, deployment.inference_config)
+    config = normalize_inference_config(deployment.source_type, deployment.inference_config, deployment.mount_config)
     if not config.get("enabled"):
         raise HTTPException(status_code=400, detail="Inference command is not configured for this deployment")
     return config
@@ -410,6 +459,14 @@ def _raise_result_file_http_error(exc: Exception, fallback_message: str = "读�
     if isinstance(exc, K8sExecError):
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
     raise HTTPException(status_code=502, detail=f"{fallback_message}: {str(exc)}") from exc
+
+
+def _result_file_error_detail(exc: Exception) -> str:
+    if isinstance(exc, HTTPException):
+        return str(exc.detail)
+    if isinstance(exc, K8sExecError):
+        return exc.message
+    return str(exc)
 
 
 async def _list_result_files_for_deployment(
@@ -434,6 +491,36 @@ async def _list_result_files_for_deployment(
         "files": files,
         "pod_name": pod_name
     }
+
+
+async def _read_result_file_bytes_for_deployment(
+    deployment: Deployment,
+    inference_config: Dict[str, Any],
+    file_info: Dict[str, Any],
+    pod_name: Optional[str] = None
+) -> bytes:
+    result_path = (inference_config.get("result_path") or "").rstrip("/")
+    relative_path = file_info["relative_path"]
+
+    if inference_config.get("result_source") == "mount":
+        mount_root = resolve_mount_result_root(deployment.mount_config or {}, inference_config)
+        file_path = resolve_mount_file_path(mount_root, relative_path)
+        with open(file_path, "rb") as f:
+            return f.read()
+
+    if not pod_name:
+        pod_name = await k8s_service.get_ready_pod_name(deployment.k8s_deployment_name, deployment.namespace)
+    container_file_path = f"{result_path}/{relative_path}".replace("//", "/")
+    return await k8s_service.read_container_file_bytes(pod_name, deployment.namespace, container_file_path)
+
+
+def _build_result_archive_name(deployment: Deployment, result_data: Dict[str, Any]) -> str:
+    raw_name = deployment.name or f"deployment-{deployment.id}"
+    safe_name = "".join(char if char.isalnum() or char in ("-", "_", ".") else "-" for char in raw_name).strip("-")
+    safe_name = safe_name or f"deployment-{deployment.id}"
+    stamp_source = result_data.get("finished_at") or result_data.get("started_at") or datetime.utcnow().isoformat()
+    stamp = "".join(char for char in stamp_source if char.isdigit())[:14] or datetime.utcnow().strftime("%Y%m%d%H%M%S")
+    return f"{safe_name}-results-{stamp}.zip"
 
 
 @router.post("/{deployment_id}/run-inference", response_model=TaskStatus)
@@ -596,7 +683,72 @@ async def get_inference_result(deployment_id: int, db: AsyncSession = Depends(ge
     if not deployment:
         raise HTTPException(status_code=404, detail="Deployment not found")
 
-    return deployment.last_inference_result or build_empty_inference_result()
+    result_data = _serialize_inference_result_payload(deployment.last_inference_result)
+    result_data["runtime"] = _get_inference_runtime_status(deployment_id)
+    return result_data
+
+
+@router.get("/{deployment_id}/inference-previews")
+async def get_inference_previews(deployment_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+
+    inference_config = _get_deployment_inference_config(deployment)
+    result_data = _serialize_inference_result_payload(deployment.last_inference_result)
+    image_files = [item for item in result_data.get("files", []) if item.get("kind") == "image"]
+
+    if not image_files:
+        return {
+            "result_digest": result_data.get("result_digest") or "",
+            "items": [],
+            "failures": [],
+            "loaded": 0,
+            "total": 0
+        }
+
+    pod_name = None
+    if inference_config.get("result_source") != "mount":
+        try:
+            pod_name = await k8s_service.get_ready_pod_name(deployment.k8s_deployment_name, deployment.namespace)
+        except Exception as exc:
+            _raise_result_file_http_error(exc, "读取结果图片失败")
+
+    items: List[Dict[str, Any]] = []
+    failures: List[Dict[str, Any]] = []
+
+    for file_info in image_files:
+        try:
+            content = await _read_result_file_bytes_for_deployment(
+                deployment,
+                inference_config,
+                file_info,
+                pod_name=pod_name
+            )
+            items.append({
+                "file_key": file_info["file_key"],
+                "name": file_info["name"],
+                "relative_path": file_info["relative_path"],
+                "size": file_info.get("size", 0),
+                "media_type": get_media_type(file_info["name"]),
+                "content_base64": base64.b64encode(content).decode("ascii")
+            })
+        except Exception as exc:
+            failures.append({
+                "file_key": file_info["file_key"],
+                "name": file_info["name"],
+                "detail": _result_file_error_detail(exc)
+            })
+
+    return {
+        "result_digest": result_data.get("result_digest") or "",
+        "items": items,
+        "failures": failures,
+        "loaded": len(items),
+        "total": len(image_files)
+    }
 
 
 @router.get("/{deployment_id}/inference-files/{file_key}/preview")
@@ -633,6 +785,46 @@ async def preview_inference_file(deployment_id: int, file_key: str, db: AsyncSes
         return Response(content=content, media_type=get_media_type(file_info["name"]))
     except Exception as exc:
         _raise_result_file_http_error(exc, "预览结果文件失败")
+
+
+@router.get("/{deployment_id}/inference-files/download-all")
+async def download_all_inference_files(deployment_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
+    deployment = result.scalar_one_or_none()
+
+    if not deployment:
+        raise HTTPException(status_code=404, detail="Deployment not found")
+
+    inference_config = _get_deployment_inference_config(deployment)
+    result_data = _serialize_inference_result_payload(deployment.last_inference_result)
+    files = list(result_data.get("files", []))
+    if not files:
+        raise HTTPException(status_code=400, detail="暂无可下载的结果文件")
+
+    pod_name = None
+    if inference_config.get("result_source") != "mount":
+        try:
+            pod_name = await k8s_service.get_ready_pod_name(deployment.k8s_deployment_name, deployment.namespace)
+        except Exception as exc:
+            _raise_result_file_http_error(exc, "打包结果文件失败")
+
+    archive_buffer = io.BytesIO()
+    try:
+        with zipfile.ZipFile(archive_buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for file_info in files:
+                content = await _read_result_file_bytes_for_deployment(
+                    deployment,
+                    inference_config,
+                    file_info,
+                    pod_name=pod_name
+                )
+                archive.writestr(file_info["relative_path"], content)
+    except Exception as exc:
+        _raise_result_file_http_error(exc, "打包结果文件失败")
+
+    archive_name = _build_result_archive_name(deployment, result_data)
+    headers = {"Content-Disposition": f'attachment; filename="{archive_name}"'}
+    return Response(content=archive_buffer.getvalue(), media_type="application/zip", headers=headers)
 
 
 @router.get("/{deployment_id}/inference-files/{file_key}/download")

@@ -30,7 +30,11 @@ def parse_template_variables(command_template: str) -> List[str]:
     return variables
 
 
-def normalize_inference_config(source_type: str, inference_config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+def normalize_inference_config(
+    source_type: str,
+    inference_config: Optional[Dict[str, Any]],
+    mount_config: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     source_type = (source_type or "").strip().lower()
     if source_type != "image":
         return {}
@@ -40,6 +44,15 @@ def normalize_inference_config(source_type: str, inference_config: Optional[Dict
     result_path = (config.get("result_path") or "").strip()
     enabled = bool(command_template and result_path)
     result_source = "container"
+    mount_path = (mount_config or {}).get("mount_path") or ""
+    mount_enabled = bool((mount_config or {}).get("enabled")) and bool(mount_path and result_path)
+    normalized_mount_path = mount_path.rstrip("/")
+    normalized_result_path = result_path.rstrip("/")
+    if mount_enabled and (
+        normalized_result_path == normalized_mount_path
+        or normalized_result_path.startswith(f"{normalized_mount_path}/")
+    ):
+        result_source = "mount"
 
     variable_names = parse_template_variables(command_template)
     configured_names = [
@@ -173,7 +186,11 @@ def scan_mount_result_files(result_root: str) -> List[Dict[str, Any]]:
         for filename in sorted(filenames):
             full_path = os.path.join(current_root, filename)
             relative_path = normalize_relative_path(result_root, full_path)
-            files.append(build_file_entry(relative_path, os.path.getsize(full_path)))
+            files.append(build_file_entry(
+                relative_path,
+                os.path.getsize(full_path),
+                int(os.path.getmtime(full_path))
+            ))
 
     return sorted(files, key=lambda item: item["relative_path"])
 
@@ -206,6 +223,7 @@ def build_empty_inference_result() -> Dict[str, Any]:
         "stdout": "",
         "stderr": "",
         "files": [],
+        "result_digest": "",
     }
 
 
@@ -240,4 +258,8 @@ def select_generated_files(before_files: List[Dict[str, Any]], after_files: List
         signature = (int(item.get("size", 0)), int(item.get("mtime", 0)))
         if before_index.get(item["relative_path"]) != signature:
             generated.append(item)
-    return generated or list(after_files or [])
+    if generated:
+        return generated
+    if before_files:
+        return []
+    return list(after_files or [])

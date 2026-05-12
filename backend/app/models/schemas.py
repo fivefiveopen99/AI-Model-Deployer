@@ -105,6 +105,9 @@ class DeploymentResponse(BaseModel):
     model_id: Optional[int]
     source_type: str
     image: Optional[str]
+    access_mode: str
+    access_path: Optional[str]
+    access_label: Optional[str]
     port: int
     namespace: str
     replicas: int
@@ -114,6 +117,7 @@ class DeploymentResponse(BaseModel):
     command: Optional[str]
     inference_config: Dict[str, Any]
     last_inference_result: Dict[str, Any]
+    inference_runtime: Dict[str, Any] = Field(default_factory=dict)
     status: str
     status_message: Optional[str]
     k8s_deployment_name: Optional[str]
@@ -133,6 +137,7 @@ class DeploymentList(BaseModel):
 
 class BuildRequest(BaseModel):
     base_image: Optional[str] = "python:3.11-slim"
+    build_node: Optional[str] = "local"
 
 
 class BuildResponse(BaseModel):

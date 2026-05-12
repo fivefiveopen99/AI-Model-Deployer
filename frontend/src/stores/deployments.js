@@ -106,6 +106,26 @@ export const useDeploymentsStore = defineStore('deployments', () => {
     }
   }
 
+  const fetchInferencePreviews = async (id) => {
+    try {
+      const response = await deploymentsApi.getInferencePreviews(id)
+      return response.data
+    } catch (error) {
+      console.error('Failed to fetch inference previews:', error)
+      throw error
+    }
+  }
+
+  const downloadAllInferenceFiles = async (id) => {
+    try {
+      const response = await deploymentsApi.downloadAllInferenceFiles(id)
+      return response
+    } catch (error) {
+      console.error('Failed to download all inference files:', error)
+      throw error
+    }
+  }
+
   const downloadInferenceFile = async (id, fileKey) => {
     try {
       const response = await deploymentsApi.downloadInferenceFile(id, fileKey)
@@ -173,7 +193,9 @@ export const useDeploymentsStore = defineStore('deployments', () => {
     scaleDeployment,
     runInference,
     fetchInferenceResult,
+    fetchInferencePreviews,
     previewInferenceFile,
+    downloadAllInferenceFiles,
     downloadInferenceFile,
     deleteDeployment,
     getDeploymentStatus,
