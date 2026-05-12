@@ -4,10 +4,44 @@ from kubernetes.stream import stream
 import os
 import shlex
 import base64
+import json
 from typing import Optional, Dict, Any, List, Callable
 import asyncio
 
 from app.core.config import settings
+
+
+FILE_READ_CONCURRENCY = 4
+FILE_READ_RETRY_ATTEMPTS = 2
+RETRYABLE_EXEC_ERROR_HINTS = (
+    "handshake status 200 ok",
+    "upgrade request required",
+    "connection aborted",
+    "connection reset",
+    "connection refused",
+    "timed out",
+    "timeout",
+    "unexpected eof",
+    "stream closed",
+    "websocket",
+    "bad handshake",
+)
+
+
+class K8sExecError(Exception):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int = 502,
+        retryable: bool = False,
+        raw_message: Optional[str] = None
+    ):
+        super().__init__(message)
+        self.message = message
+        self.status_code = status_code
+        self.retryable = retryable
+        self.raw_message = raw_message or message
 
 
 class K8sService:
@@ -15,6 +49,7 @@ class K8sService:
         self.core_api = None
         self.apps_api = None
         self._connected = False
+        self._file_read_semaphore = None
         self._connect()
     
     def _connect(self):
@@ -860,12 +895,86 @@ class K8sService:
             return ""
         return chunk.replace(f"{marker}\n", "").replace(marker, "")
 
-    async def exec_in_pod(self, pod_name: str, namespace: str, shell_command: str) -> Dict[str, Any]:
+    def _get_file_read_semaphore(self) -> asyncio.Semaphore:
+        if self._file_read_semaphore is None:
+            self._file_read_semaphore = asyncio.Semaphore(FILE_READ_CONCURRENCY)
+        return self._file_read_semaphore
+
+    def _extract_exec_error_message(self, exc: Exception) -> str:
+        candidates = [
+            getattr(exc, "body", None),
+            getattr(exc, "reason", None),
+            str(exc),
+        ]
+
+        for candidate in candidates:
+            if not candidate:
+                continue
+            if isinstance(candidate, (dict, list)):
+                try:
+                    return json.dumps(candidate, ensure_ascii=False)
+                except Exception:
+                    return str(candidate)
+            text = str(candidate).strip()
+            if not text:
+                continue
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, dict):
+                    return str(parsed.get("message") or parsed.get("detail") or text)
+            except Exception:
+                pass
+            return text
+
+        return "Unknown Kubernetes exec error"
+
+    def _is_retryable_exec_message(self, message: str) -> bool:
+        lower_message = (message or "").lower()
+        return any(hint in lower_message for hint in RETRYABLE_EXEC_ERROR_HINTS)
+
+    def _normalize_exec_error(self, exc: Exception, action: str) -> K8sExecError:
+        raw_message = self._extract_exec_error_message(exc)
+        lower_message = raw_message.lower()
+
+        if "result file not found" in lower_message:
+            return K8sExecError("结果文件不存在或已被清理", status_code=404, raw_message=raw_message)
+        if "result directory not found" in lower_message:
+            return K8sExecError("结果目录不存在或尚未生成", status_code=404, raw_message=raw_message)
+        if "permission denied" in lower_message or "forbidden" in lower_message:
+            return K8sExecError(f"Kubernetes 无权限{action}: {raw_message}", status_code=403, raw_message=raw_message)
+        if self._is_retryable_exec_message(raw_message):
+            return K8sExecError(
+                f"Kubernetes 临时{action}失败，自动重试后仍未成功: {raw_message}",
+                status_code=502,
+                retryable=True,
+                raw_message=raw_message
+            )
+        return K8sExecError(f"Kubernetes {action}失败: {raw_message}", status_code=502, raw_message=raw_message)
+
+    async def exec_in_pod(
+        self,
+        pod_name: str,
+        namespace: str,
+        shell_command: str,
+        retry_attempts: int = 0,
+        action: str = "执行容器命令"
+    ) -> Dict[str, Any]:
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self._exec_in_pod_sync(pod_name, namespace, shell_command)
-        )
+        max_attempts = retry_attempts + 1
+
+        for attempt in range(max_attempts):
+            try:
+                return await loop.run_in_executor(
+                    None,
+                    lambda: self._exec_in_pod_sync(pod_name, namespace, shell_command)
+                )
+            except K8sExecError:
+                raise
+            except Exception as exc:
+                normalized_error = self._normalize_exec_error(exc, action)
+                if attempt >= retry_attempts or not normalized_error.retryable:
+                    raise normalized_error from exc
+                await asyncio.sleep(0.2 * (attempt + 1))
 
     def _exec_in_pod_streaming_sync(
         self,
@@ -974,9 +1083,18 @@ class K8sService:
             'mtime=$(stat -c %Y "$f" 2>/dev/null || stat -f %m "$f" 2>/dev/null || echo 0); '
             'printf "%s\\t%s\\t%s\\n" "$rel" "$size" "$mtime"; done\' sh "$ROOT" {} +'
         )
-        result = await self.exec_in_pod(pod_name, namespace, command)
+        result = await self.exec_in_pod(
+            pod_name,
+            namespace,
+            command,
+            retry_attempts=FILE_READ_RETRY_ATTEMPTS,
+            action="读取结果文件列表"
+        )
         if result["exit_code"] != 0:
-            raise Exception(result["stderr"] or "Failed to list container result files")
+            raise self._normalize_exec_error(
+                Exception(result["stderr"] or "Failed to list container result files"),
+                "读取结果文件列表"
+            )
 
         from app.services.inference_service import build_file_entry
 
@@ -1009,10 +1127,27 @@ class K8sService:
             'if [ ! -f "$FILE" ]; then echo "Result file not found: $FILE" >&2; exit 12; fi; '
             'base64 "$FILE" | tr -d "\\n"'
         )
-        result = await self.exec_in_pod(pod_name, namespace, command)
-        if result["exit_code"] != 0:
-            raise Exception(result["stderr"] or "Failed to read container file")
-        return base64.b64decode(result["stdout"].encode("ascii"))
+        async with self._get_file_read_semaphore():
+            result = await self.exec_in_pod(
+                pod_name,
+                namespace,
+                command,
+                retry_attempts=FILE_READ_RETRY_ATTEMPTS,
+                action="读取结果文件"
+            )
+            if result["exit_code"] != 0:
+                raise self._normalize_exec_error(
+                    Exception(result["stderr"] or "Failed to read container file"),
+                    "读取结果文件"
+                )
+            try:
+                return base64.b64decode(result["stdout"].encode("ascii"))
+            except Exception as exc:
+                raise K8sExecError(
+                    f"Kubernetes 读取结果文件失败: 返回内容不是有效的二进制数据 ({str(exc)})",
+                    status_code=502,
+                    raw_message=str(exc)
+                ) from exc
 
     async def read_container_text_file(
         self,
@@ -1027,10 +1162,20 @@ class K8sService:
             'if [ ! -f "$FILE" ]; then echo "Result file not found: $FILE" >&2; exit 12; fi; '
             f'head -c {max_bytes} "$FILE"'
         )
-        result = await self.exec_in_pod(pod_name, namespace, command)
-        if result["exit_code"] != 0:
-            raise Exception(result["stderr"] or "Failed to read container text file")
-        return result["stdout"]
+        async with self._get_file_read_semaphore():
+            result = await self.exec_in_pod(
+                pod_name,
+                namespace,
+                command,
+                retry_attempts=FILE_READ_RETRY_ATTEMPTS,
+                action="读取结果文本"
+            )
+            if result["exit_code"] != 0:
+                raise self._normalize_exec_error(
+                    Exception(result["stderr"] or "Failed to read container text file"),
+                    "读取结果文本"
+                )
+            return result["stdout"]
     
     async def get_worker_nodes(self) -> List[Dict[str, Any]]:
         """获取所有工作节点（role=worker）"""
