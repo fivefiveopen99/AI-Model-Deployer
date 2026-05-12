@@ -11,7 +11,7 @@ from app.models.database import get_db, AIModel, Deployment, DeployStatus, Model
 from app.models.schemas import (
     DeploymentCreate, DeploymentUpdate, DeploymentResponse, DeploymentList, TaskStatus, InferenceRunRequest
 )
-from app.services.k8s_service import k8s_service
+from app.services.k8s_service import K8sExecError, k8s_service
 from app.services.nfs_service import NFSDiscoveryError, discover_nfs_config
 from app.core.config import settings
 from app.services.inference_service import (
@@ -404,6 +404,14 @@ def _get_deployment_inference_config(deployment: Deployment) -> Dict[str, Any]:
     return config
 
 
+def _raise_result_file_http_error(exc: Exception, fallback_message: str = "读取结果文件失败"):
+    if isinstance(exc, HTTPException):
+        raise exc
+    if isinstance(exc, K8sExecError):
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+    raise HTTPException(status_code=502, detail=f"{fallback_message}: {str(exc)}") from exc
+
+
 async def _list_result_files_for_deployment(
     deployment: Deployment,
     inference_config: Dict[str, Any],
@@ -614,14 +622,17 @@ async def preview_inference_file(deployment_id: int, file_key: str, db: AsyncSes
                 return PlainTextResponse(f.read())
         return FileResponse(file_path, media_type=get_media_type(file_info["name"]))
 
-    pod_name = await k8s_service.get_ready_pod_name(deployment.k8s_deployment_name, deployment.namespace)
-    container_file_path = f"{result_path}/{file_info['relative_path']}".replace("//", "/")
-    if file_info["kind"] == "text":
-        content = await k8s_service.read_container_text_file(pod_name, deployment.namespace, container_file_path)
-        return PlainTextResponse(content)
+    try:
+        pod_name = await k8s_service.get_ready_pod_name(deployment.k8s_deployment_name, deployment.namespace)
+        container_file_path = f"{result_path}/{file_info['relative_path']}".replace("//", "/")
+        if file_info["kind"] == "text":
+            content = await k8s_service.read_container_text_file(pod_name, deployment.namespace, container_file_path)
+            return PlainTextResponse(content)
 
-    content = await k8s_service.read_container_file_bytes(pod_name, deployment.namespace, container_file_path)
-    return Response(content=content, media_type=get_media_type(file_info["name"]))
+        content = await k8s_service.read_container_file_bytes(pod_name, deployment.namespace, container_file_path)
+        return Response(content=content, media_type=get_media_type(file_info["name"]))
+    except Exception as exc:
+        _raise_result_file_http_error(exc, "预览结果文件失败")
 
 
 @router.get("/{deployment_id}/inference-files/{file_key}/download")
@@ -646,11 +657,14 @@ async def download_inference_file(deployment_id: int, file_key: str, db: AsyncSe
             filename=file_info["name"]
         )
 
-    pod_name = await k8s_service.get_ready_pod_name(deployment.k8s_deployment_name, deployment.namespace)
-    container_file_path = f"{result_path}/{file_info['relative_path']}".replace("//", "/")
-    content = await k8s_service.read_container_file_bytes(pod_name, deployment.namespace, container_file_path)
-    headers = {"Content-Disposition": f'attachment; filename="{file_info["name"]}"'}
-    return Response(content=content, media_type=get_media_type(file_info["name"]), headers=headers)
+    try:
+        pod_name = await k8s_service.get_ready_pod_name(deployment.k8s_deployment_name, deployment.namespace)
+        container_file_path = f"{result_path}/{file_info['relative_path']}".replace("//", "/")
+        content = await k8s_service.read_container_file_bytes(pod_name, deployment.namespace, container_file_path)
+        headers = {"Content-Disposition": f'attachment; filename="{file_info["name"]}"'}
+        return Response(content=content, media_type=get_media_type(file_info["name"]), headers=headers)
+    except Exception as exc:
+        _raise_result_file_http_error(exc, "下载结果文件失败")
 
 
 @router.get("/{deployment_id}/status")

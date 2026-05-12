@@ -115,12 +115,21 @@
               <el-table-column label="预览" width="100">
                 <template #default="{ row }">
                   <img
-                    v-if="row.kind === 'image'"
-                    :src="getPreviewUrl(row)"
+                    v-if="row.kind === 'image' && imagePreviewCache[row.file_key]"
+                    :src="imagePreviewCache[row.file_key]"
                     :alt="row.name"
                     class="result-thumbnail"
                     @click="openImagePreview(row)"
                   />
+                  <el-button
+                    v-else-if="row.kind === 'image'"
+                    size="small"
+                    text
+                    :loading="isImagePreviewLoading(row.file_key)"
+                    @click="loadImagePreview(row, { force: true })"
+                  >
+                    {{ getImagePreviewActionText(row.file_key) }}
+                  </el-button>
                   <span v-else>-</span>
                 </template>
               </el-table-column>
@@ -132,7 +141,14 @@
               <el-table-column label="操作" width="180">
                 <template #default="{ row }">
                   <el-button size="small" @click="previewFile(row)" :disabled="!row.previewable">预览</el-button>
-                  <el-button size="small" type="primary" @click="downloadFile(row)">下载</el-button>
+                  <el-button
+                    size="small"
+                    type="primary"
+                    :loading="Boolean(downloadLoading[row.file_key])"
+                    @click="downloadFile(row)"
+                  >
+                    下载
+                  </el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -168,6 +184,8 @@ import { useDeploymentsStore } from '@/stores/deployments'
 import { getDeploymentStatusText, getDeploymentStatusType } from '@/utils/formatters'
 import { useWebSocket } from '@/composables/useWebSocket'
 
+const PREVIEW_CONCURRENCY = 4
+
 const route = useRoute()
 const router = useRouter()
 const deploymentsStore = useDeploymentsStore()
@@ -192,6 +210,11 @@ const pdfPreviewUrl = ref('')
 const imagePreviewVisible = ref(false)
 const imagePreviewDialogUrl = ref('')
 const imagePreviewCache = reactive({})
+const imagePreviewStatus = reactive({})
+const imagePreviewErrors = reactive({})
+const downloadLoading = reactive({})
+const previewBatchToken = ref(0)
+const imagePreviewRequests = new Map()
 
 const inferenceConfig = computed(() => deployment.value?.inference_config || {})
 const inferenceEnabled = computed(() => Boolean(inferenceConfig.value?.enabled))
@@ -229,12 +252,64 @@ const outputLines = computed(() => {
 })
 
 const getPreviewUrl = (file) => imagePreviewCache[file.file_key] || `/api/v1/deployments/${deployment.value.id}/inference-files/${file.file_key}/preview`
-const getDownloadUrl = (file) => `/api/v1/deployments/${deployment.value.id}/inference-files/${encodeURIComponent(file.file_key)}/download`
 
 const scrollLogOutputToBottom = async () => {
   await nextTick()
   if (!logOutputRef.value) return
   logOutputRef.value.scrollTop = logOutputRef.value.scrollHeight
+}
+
+const clearImagePreviewState = () => {
+  previewBatchToken.value += 1
+  imagePreviewRequests.clear()
+  Object.values(imagePreviewCache).forEach((url) => {
+    window.URL.revokeObjectURL(url)
+  })
+  Object.keys(imagePreviewCache).forEach((key) => {
+    delete imagePreviewCache[key]
+  })
+  Object.keys(imagePreviewStatus).forEach((key) => {
+    delete imagePreviewStatus[key]
+  })
+  Object.keys(imagePreviewErrors).forEach((key) => {
+    delete imagePreviewErrors[key]
+  })
+  imagePreviewVisible.value = false
+  imagePreviewDialogUrl.value = ''
+}
+
+const getBlobContentType = (response) => {
+  return response?.data?.type
+    || response?.headers?.['content-type']
+    || response?.headers?.['Content-Type']
+    || 'application/octet-stream'
+}
+
+const createBlobFromResponse = (response) => {
+  if (response?.data instanceof Blob) {
+    return response.data
+  }
+  return new Blob([response?.data], { type: getBlobContentType(response) })
+}
+
+const extractResponseErrorMessage = async (error, fallbackMessage) => {
+  const responseData = error?.response?.data
+  if (responseData instanceof Blob) {
+    try {
+      const text = await responseData.text()
+      if (text) {
+        try {
+          const parsed = JSON.parse(text)
+          return parsed?.detail || parsed?.message || text || fallbackMessage
+        } catch {
+          return text || fallbackMessage
+        }
+      }
+    } catch {
+      return fallbackMessage
+    }
+  }
+  return error?.response?.data?.detail || error?.message || fallbackMessage
 }
 
 const initInferenceVariables = () => {
@@ -251,16 +326,28 @@ const initInferenceVariables = () => {
   })
 }
 
+const isImagePreviewLoading = (fileKey) => {
+  return imagePreviewStatus[fileKey] === 'loading' || imagePreviewStatus[fileKey] === 'retrying'
+}
+
+const getImagePreviewActionText = (fileKey) => {
+  if (imagePreviewStatus[fileKey] === 'retrying') {
+    return '重试中'
+  }
+  if (imagePreviewErrors[fileKey]) {
+    return '重试预览'
+  }
+  if (imagePreviewStatus[fileKey] === 'loading') {
+    return '加载中'
+  }
+  return '加载预览'
+}
+
 const refreshInferenceResult = async () => {
   if (!deployment.value) return
   inferenceResultLoading.value = true
   try {
-    Object.values(imagePreviewCache).forEach((url) => {
-      window.URL.revokeObjectURL(url)
-    })
-    Object.keys(imagePreviewCache).forEach((key) => {
-      delete imagePreviewCache[key]
-    })
+    clearImagePreviewState()
     inferenceResult.value = await deploymentsStore.fetchInferenceResult(deployment.value.id)
   } catch (error) {
     ElMessage.error('获取推理结果失败')
@@ -309,7 +396,7 @@ const previewDocument = async (file) => {
     textPreviewContent.value = response.data || ''
     textPreviewVisible.value = true
   } catch (error) {
-    ElMessage.error('文档预览失败')
+    ElMessage.error(await extractResponseErrorMessage(error, '文档预览失败'))
   }
 }
 
@@ -321,37 +408,125 @@ const previewFile = (file) => {
   previewDocument(file)
 }
 
-const openImagePreview = (file) => {
-  imagePreviewDialogUrl.value = getPreviewUrl(file)
+const loadImagePreview = async (file, { force = false } = {}) => {
+  if (!deployment.value || file.kind !== 'image') return
+  if (!force && imagePreviewCache[file.file_key]) {
+    return true
+  }
+  if (imagePreviewRequests.has(file.file_key)) {
+    return imagePreviewRequests.get(file.file_key)
+  }
+
+  const batchToken = previewBatchToken.value
+  const currentStatus = imagePreviewStatus[file.file_key]
+  imagePreviewStatus[file.file_key] = force && (imagePreviewErrors[file.file_key] || currentStatus === 'failed')
+    ? 'retrying'
+    : 'loading'
+  delete imagePreviewErrors[file.file_key]
+
+  let requestPromise = null
+  requestPromise = (async () => {
+    try {
+      const response = await deploymentsStore.previewInferenceFile(deployment.value.id, file.file_key, 'blob')
+      const blob = createBlobFromResponse(response)
+      const objectUrl = window.URL.createObjectURL(blob)
+
+      if (batchToken !== previewBatchToken.value) {
+        window.URL.revokeObjectURL(objectUrl)
+        return false
+      }
+
+      if (imagePreviewCache[file.file_key]) {
+        window.URL.revokeObjectURL(imagePreviewCache[file.file_key])
+      }
+      imagePreviewCache[file.file_key] = objectUrl
+      imagePreviewStatus[file.file_key] = 'loaded'
+      delete imagePreviewErrors[file.file_key]
+      return true
+    } catch (error) {
+      if (batchToken === previewBatchToken.value) {
+        imagePreviewErrors[file.file_key] = await extractResponseErrorMessage(error, '图片预览失败')
+        imagePreviewStatus[file.file_key] = 'failed'
+      }
+      return false
+    } finally {
+      imagePreviewRequests.delete(file.file_key)
+    }
+  })()
+
+  imagePreviewRequests.set(file.file_key, requestPromise)
+  return requestPromise
+}
+
+const openImagePreview = async (file) => {
+  if (!imagePreviewCache[file.file_key]) {
+    await loadImagePreview(file, { force: true })
+  }
+  if (!imagePreviewCache[file.file_key]) {
+    ElMessage.error(imagePreviewErrors[file.file_key] || '图片预览失败')
+    return
+  }
+  imagePreviewDialogUrl.value = imagePreviewCache[file.file_key]
   imagePreviewVisible.value = true
 }
 
-const downloadFile = (file) => {
+const downloadFile = async (file) => {
   if (!deployment.value) return
-  const link = document.createElement('a')
-  link.href = getDownloadUrl(file)
-  link.download = file.name
-  link.rel = 'noopener'
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
+  downloadLoading[file.file_key] = true
+  try {
+    const response = await deploymentsStore.downloadInferenceFile(deployment.value.id, file.file_key)
+    const blob = createBlobFromResponse(response)
+    const objectUrl = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = file.name
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.setTimeout(() => {
+      window.URL.revokeObjectURL(objectUrl)
+    }, 1000)
+  } catch (error) {
+    ElMessage.error(await extractResponseErrorMessage(error, '文件下载失败'))
+  } finally {
+    downloadLoading[file.file_key] = false
+  }
 }
 
 const preloadImagePreviews = async () => {
   if (!deployment.value) return
-  const files = imageFiles.value.filter(file => !imagePreviewCache[file.file_key])
-  await Promise.all(files.map(async (file) => {
-    try {
-      const response = await deploymentsStore.previewInferenceFile(deployment.value.id, file.file_key, 'blob')
-      const blob = new Blob([response.data], {
-        type: response.data?.type || 'application/octet-stream'
-      })
-      imagePreviewCache[file.file_key] = window.URL.createObjectURL(blob)
-    } catch (error) {
-      console.error(`Failed to preload image preview for ${file.name}:`, error)
+  const files = imageFiles.value.filter((file) => !imagePreviewCache[file.file_key])
+  if (!files.length) return
+
+  const batchToken = previewBatchToken.value
+  let cursor = 0
+  const workerCount = Math.min(PREVIEW_CONCURRENCY, files.length)
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (cursor < files.length) {
+      if (batchToken !== previewBatchToken.value) {
+        return
+      }
+      const nextFile = files[cursor]
+      cursor += 1
+      await loadImagePreview(nextFile)
     }
   }))
 }
+
+const resetDownloadState = () => {
+  Object.keys(downloadLoading).forEach((key) => {
+    delete downloadLoading[key]
+  })
+}
+
+watch(inferenceFiles, () => {
+  resetDownloadState()
+  if (!inferenceFiles.value.length) {
+    clearImagePreviewState()
+  }
+})
 
 const formatFileSize = (size) => {
   if (!size && size !== 0) return '-'
@@ -430,9 +605,8 @@ onUnmounted(() => {
   if (currentInferenceTaskId.value) {
     unsubscribe(currentInferenceTaskId.value)
   }
-  Object.values(imagePreviewCache).forEach((url) => {
-    window.URL.revokeObjectURL(url)
-  })
+  resetDownloadState()
+  clearImagePreviewState()
 })
 </script>
 
