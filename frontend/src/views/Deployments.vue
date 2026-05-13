@@ -1,14 +1,14 @@
 <template>
   <div class="page-shell deployments-page">
     <PageHero
-      eyebrow="Deployments Center"
+      eyebrow="部署中心"
       title="部署管理中心"
       description="把模型部署、镜像部署、资源配置和访问入口收敛在同一条交付路径里。"
     >
       <template #meta>
-        <span class="badge-pill">Total {{ deploymentsStore.total }}</span>
-        <span class="badge-pill">Running {{ runningCount }}</span>
-        <span class="badge-pill">Image {{ imageSourceCount }}</span>
+        <span class="badge-pill">总数 {{ deploymentsStore.total }}</span>
+        <span class="badge-pill">运行中 {{ runningCount }}</span>
+        <span class="badge-pill">镜像来源 {{ imageSourceCount }}</span>
       </template>
       <template #actions>
         <el-button type="primary" class="hero-primary" @click="showCreateDialog('model')">
@@ -27,22 +27,22 @@
     </PageHero>
 
     <section class="metrics-grid">
-      <MetricCard label="Total Deployments" :value="deploymentsStore.total" hint="平台当前记录的全部部署对象" tone="brand">
+      <MetricCard label="部署总数" :value="deploymentsStore.total" hint="平台当前记录的全部部署对象" tone="brand">
         <template #icon>
           <el-icon :size="28"><Ship /></el-icon>
         </template>
       </MetricCard>
-      <MetricCard label="Running" :value="runningCount" hint="已经同步为运行中的在线服务" tone="success">
+      <MetricCard label="运行中" :value="runningCount" hint="已经同步为运行中的在线服务" tone="success">
         <template #icon>
           <el-icon :size="28"><Promotion /></el-icon>
         </template>
       </MetricCard>
-      <MetricCard label="Pending" :value="pendingCount" hint="已创建记录但还未开始或完成部署" tone="warning">
+      <MetricCard label="待处理" :value="pendingCount" hint="已创建记录但还未开始或完成部署" tone="warning">
         <template #icon>
           <el-icon :size="28"><Clock /></el-icon>
         </template>
       </MetricCard>
-      <MetricCard label="Image Source" :value="imageSourceCount" hint="直接从 Registry 镜像创建的部署" tone="default">
+      <MetricCard label="镜像来源" :value="imageSourceCount" hint="直接从 Registry 镜像创建的部署" tone="default">
         <template #icon>
           <el-icon :size="28"><Collection /></el-icon>
         </template>
@@ -50,7 +50,7 @@
     </section>
 
     <PanelCard
-      eyebrow="Deployment Inventory"
+      eyebrow="部署清单"
       title="所有部署"
       description="查看状态、访问地址、扩缩容与后续操作。"
     >
@@ -117,12 +117,12 @@
             </div>
           </template>
           </el-table-column>
-          <el-table-column prop="created_at" label="创建时间" width="104">
+          <el-table-column prop="created_at" label="创建时间" width="132">
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
           </template>
           </el-table-column>
-          <el-table-column label="操作" width="220">
+          <el-table-column label="操作" width="248">
           <template #default="{ row }">
             <div class="action-row">
               <el-button size="small" @click="viewDetail(row)">详情</el-button>
@@ -583,8 +583,34 @@ const rules = {
   replicas: [{ required: true, message: '请输入副本数', trigger: 'blur' }]
 }
 
+const isRegistryBackedModel = (model) => {
+  return Boolean(
+    model?.status === 'ready' &&
+    model?.docker_image &&
+    model?.docker_image_tag
+  )
+}
+
+const isImageWorkflowModel = (model) => {
+  return Boolean(
+    model?.config?.workflow_type === 'finetune' ||
+    model?.config?.runtime_spec?.dockerfile_content
+  )
+}
+
+const isPlatformModelRegistryRepository = (repository, namespacePrefix = '') => {
+  const normalizedRepository = (repository || '').trim().replace(/^\/+|\/+$/g, '')
+  const normalizedNamespace = (namespacePrefix || '').trim().replace(/^\/+|\/+$/g, '')
+  const platformRepository = normalizedNamespace ? `${normalizedNamespace}/ai-model` : 'ai-model'
+
+  return normalizedRepository === platformRepository
+}
+
 const readyModels = computed(() => {
-  return modelsStore.models.filter(m => m.status === 'ready')
+  return modelsStore.models.filter(model => (
+    isRegistryBackedModel(model) &&
+    !isImageWorkflowModel(model)
+  ))
 })
 
 const runningCount = computed(() => deploymentsStore.deployments.filter((deployment) => deployment.status === 'running').length)
@@ -612,11 +638,15 @@ const shouldShowDeployAction = (deployment) => {
 const loadRegistryImages = async () => {
   const response = await systemApi.getRegistryImages()
   const items = response.data.items || []
-  registryImageOptions.value = items.flatMap(item => (item.tags || []).map(tag => ({
-    repository: item.repository,
-    tag,
-    image_ref: `${item.repository}:${tag}`
-  })))
+  const namespacePrefix = response.data.namespace_prefix || ''
+
+  registryImageOptions.value = items
+    .filter(item => !isPlatformModelRegistryRepository(item.repository, namespacePrefix))
+    .flatMap(item => (item.tags || []).map(tag => ({
+      repository: item.repository,
+      tag,
+      image_ref: `${item.repository}:${tag}`
+    })))
 }
 
 const showCreateDialog = async (mode = 'model') => {
@@ -906,7 +936,8 @@ const viewDetail = (row) => {
 
 const openAccessEntry = (row) => {
   if (!row?.access_path) return
-  router.push(row.access_path)
+  const target = router.resolve(row.access_path)
+  window.open(target.href, '_blank', 'noopener')
 }
 
 const refreshDeployments = () => {
@@ -1107,8 +1138,15 @@ const stopPolling = () => {
 
 .action-row {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  flex-wrap: nowrap;
   gap: 6px;
+  white-space: nowrap;
+}
+
+.action-row :deep(.el-button) {
+  flex: 0 0 auto;
+  margin-left: 0 !important;
 }
 
 .deployments-table :deep(.el-table__header th) {

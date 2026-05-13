@@ -1,7 +1,6 @@
 <template>
   <section class="page-hero">
     <div class="page-hero__copy">
-      <span v-if="eyebrow" class="page-hero__eyebrow">{{ eyebrow }}</span>
       <h1>{{ title }}</h1>
       <div v-if="$slots.meta" class="page-hero__meta">
         <slot name="meta" />
@@ -41,16 +40,6 @@ defineProps({
 
 .page-hero__copy {
   max-width: 760px;
-}
-
-.page-hero__eyebrow {
-  display: inline-block;
-  margin-bottom: 4px;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--ui-text-faint);
 }
 
 .page-hero__copy h1 {

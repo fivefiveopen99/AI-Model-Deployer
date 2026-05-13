@@ -115,7 +115,7 @@ import MetricCard from '@/components/ui/MetricCard.vue'
 import PanelCard from '@/components/ui/PanelCard.vue'
 import CodeBlock from '@/components/ui/CodeBlock.vue'
 import { useModelsStore } from '@/stores/models'
-import { formatDate, getModelStatusText } from '@/utils/formatters'
+import { formatDate, formatImageRef, getModelStatusText } from '@/utils/formatters'
 
 const route = useRoute()
 const modelsStore = useModelsStore()
@@ -125,7 +125,7 @@ const dockerImageRef = computed(() => {
   if (!model.value?.docker_image) {
     return '未构建'
   }
-  return `${model.value.docker_image}:${model.value.docker_image_tag}`
+  return formatImageRef(model.value.docker_image, model.value.docker_image_tag)
 })
 
 const configText = computed(() => JSON.stringify(model.value?.config || {}, null, 2))

@@ -1,7 +1,6 @@
 <template>
   <div class="page-shell dashboard-page">
     <PageHero
-      eyebrow="系统总览"
       title="模型交付控制台"
       description="查看模型、部署和集群状态。"
     >
@@ -67,7 +66,6 @@
 
     <section class="two-column-grid">
       <PanelCard
-        eyebrow="运行环境"
         title="系统连接状态"
         description=""
       >
@@ -92,23 +90,22 @@
       </PanelCard>
 
       <PanelCard
-        eyebrow="常用操作"
         title="推荐操作路径"
         description=""
       >
         <div class="action-grid">
           <button class="action-tile" type="button" @click="router.push('/models')">
-            <span class="action-tile__eyebrow">01</span>
+            <span class="action-tile__icon"><el-icon><Box /></el-icon></span>
             <strong>导入模型项目</strong>
             <p>支持 GitHub、压缩包和直链导入。</p>
           </button>
           <button class="action-tile" type="button" @click="router.push('/images')">
-            <span class="action-tile__eyebrow">02</span>
+            <span class="action-tile__icon"><el-icon><Collection /></el-icon></span>
             <strong>管理镜像仓库</strong>
             <p>查看镜像、手动构建运行时，或导入镜像包。</p>
           </button>
           <button class="action-tile" type="button" @click="router.push('/deployments')">
-            <span class="action-tile__eyebrow">03</span>
+            <span class="action-tile__icon"><el-icon><Ship /></el-icon></span>
             <strong>创建并部署服务</strong>
             <p>从可部署模型或镜像生成部署并推送到集群。</p>
           </button>
@@ -118,7 +115,6 @@
 
     <section class="two-column-grid">
       <PanelCard
-        eyebrow="最近记录"
         title="最近模型"
         description=""
       >
@@ -150,7 +146,6 @@
       </PanelCard>
 
       <PanelCard
-        eyebrow="最近记录"
         title="最近部署"
         description=""
       >
@@ -242,7 +237,7 @@ onMounted(() => {
   justify-content: space-between;
   gap: 14px;
   padding: 12px 0;
-  border-bottom: 1px solid rgba(68, 80, 86, 0.08);
+  border-bottom: 1px solid rgba(27, 86, 159, 0.1);
 }
 
 .status-row:last-child {
@@ -274,7 +269,7 @@ onMounted(() => {
   padding: 14px;
   border: 1px solid var(--ui-border);
   border-radius: 8px;
-  background: rgba(249, 250, 246, 0.94);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(242, 247, 255, 0.96));
   text-align: left;
   color: var(--ui-text);
   cursor: pointer;
@@ -283,18 +278,20 @@ onMounted(() => {
 }
 
 .action-tile:hover {
-  border-color: rgba(45, 108, 150, 0.22);
+  border-color: rgba(42, 115, 209, 0.32);
   background: #fff;
 }
 
-.action-tile__eyebrow {
-  display: inline-block;
+.action-tile__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   margin-bottom: 8px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--ui-text-faint);
+  border-radius: 6px;
+  color: var(--ui-brand);
+  background: var(--ui-brand-soft);
 }
 
 .action-tile strong {

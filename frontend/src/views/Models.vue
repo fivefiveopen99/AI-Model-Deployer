@@ -1,14 +1,14 @@
 <template>
   <div class="page-shell models-page">
     <PageHero
-      eyebrow="Model Assets"
+      eyebrow="模型资产"
       title="模型管理台"
       description="统一管理导入、上传、构建与重置状态。列表保留业务操作密度，但视觉和信息层级统一到新版控制台。"
     >
       <template #meta>
-        <span class="badge-pill">Total {{ modelsStore.total }}</span>
-        <span class="badge-pill">Ready {{ readyCount }}</span>
-        <span class="badge-pill">Building {{ buildingCount }}</span>
+        <span class="badge-pill">总数 {{ modelsStore.total }}</span>
+        <span class="badge-pill">就绪 {{ readyCount }}</span>
+        <span class="badge-pill">构建中 {{ buildingCount }}</span>
       </template>
       <template #actions>
         <el-button @click="refreshModels">
@@ -23,22 +23,22 @@
     </PageHero>
 
     <section class="metrics-grid">
-      <MetricCard label="Total Models" :value="modelsStore.total" hint="当前登记到平台的全部模型资产" tone="brand">
+      <MetricCard label="模型总数" :value="modelsStore.total" hint="当前登记到平台的全部模型资产" tone="brand">
         <template #icon>
           <el-icon :size="28"><Box /></el-icon>
         </template>
       </MetricCard>
-      <MetricCard label="Ready" :value="readyCount" hint="构建完成且可直接创建部署" tone="success">
+      <MetricCard label="就绪" :value="readyCount" hint="构建完成且可直接创建部署" tone="success">
         <template #icon>
           <el-icon :size="28"><CircleCheck /></el-icon>
         </template>
       </MetricCard>
-      <MetricCard label="Building" :value="buildingCount" hint="包括 building 与 pushing 状态" tone="warning">
+      <MetricCard label="构建中" :value="buildingCount" hint="包括 building 与 pushing 状态" tone="warning">
         <template #icon>
           <el-icon :size="28"><Loading /></el-icon>
         </template>
       </MetricCard>
-      <MetricCard label="Failed" :value="failedCount" hint="需要检查依赖、权重或构建日志" tone="danger">
+      <MetricCard label="失败" :value="failedCount" hint="需要检查依赖、权重或构建日志" tone="danger">
         <template #icon>
           <el-icon :size="28"><Warning /></el-icon>
         </template>
@@ -46,12 +46,12 @@
     </section>
 
     <PanelCard
-      eyebrow="Model Inventory"
+      eyebrow="模型清单"
       title="模型列表"
       description="保留模型来源、镜像状态和快捷操作，并把构建相关动作统一收敛到列表上下文。"
     >
       <template #actions>
-        <span class="badge-pill">Page {{ currentPage }}</span>
+        <span class="badge-pill">第 {{ currentPage }} 页</span>
       </template>
 
       <el-table :data="modelsStore.models" v-loading="modelsStore.loading" stripe class="models-table">
@@ -77,7 +77,7 @@
         <el-table-column prop="docker_image" label="Docker镜像">
           <template #default="{ row }">
             <span v-if="row.docker_image">
-              {{ row.docker_image }}:{{ row.docker_image_tag }}
+              {{ formatImageRef(row.docker_image, row.docker_image_tag) }}
             </span>
             <span v-else class="text-gray">未构建</span>
           </template>
@@ -352,7 +352,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { useModelsStore } from '@/stores/models'
 import { useBuildStore } from '@/stores/build'
 import { useWebSocket } from '@/composables/useWebSocket'
-import { formatDate, getModelStatusText, getModelStatusType } from '@/utils/formatters'
+import { formatDate, formatImageRef, getModelStatusText, getModelStatusType } from '@/utils/formatters'
 
 const router = useRouter()
 const modelsStore = useModelsStore()

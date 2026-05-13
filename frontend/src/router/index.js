@@ -67,6 +67,7 @@ const routes = [
         name: 'DeploymentInference',
         component: DeploymentInference,
         meta: {
+          hideSidebar: true,
           navLabel: '命令工作台',
           navDescription: '镜像命令模板与结果浏览'
         }
@@ -76,6 +77,7 @@ const routes = [
         name: 'ModelPlayground',
         component: ModelPlayground,
         meta: {
+          hideSidebar: true,
           navLabel: '模型交互测试',
           navDescription: '请求、预览与结果分析'
         }

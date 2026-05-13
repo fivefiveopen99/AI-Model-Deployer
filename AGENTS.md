@@ -4,7 +4,7 @@ This file is the project-level context file for Codex and other coding agents. R
 
 ## Project Summary
 
-AI Model Deployer is a FastAPI + Vue application for managing AI model projects, packaging them into Docker images, pushing those images to the bundled Docker Registry service, and creating Kubernetes deployments for online inference.
+OG-MAP is a FastAPI + Vue application for managing AI model projects, packaging them into Docker images, pushing those images to the bundled Docker Registry service, and creating Kubernetes deployments for online inference.
 
 Core goals:
 

@@ -315,7 +315,8 @@ const submitScale = async () => {
 
 const openAccessEntry = () => {
   if (!deployment.value?.access_path) return
-  router.push(deployment.value.access_path)
+  const target = router.resolve(deployment.value.access_path)
+  window.open(target.href, '_blank', 'noopener')
 }
 
 onMounted(async () => {

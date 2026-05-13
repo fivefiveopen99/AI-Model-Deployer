@@ -6,8 +6,8 @@
       description="统一查看私有 Registry 中的仓库、标签和导入入口，同时保留手动构建与本地镜像上传流程。"
     >
       <template #meta>
-        <span class="badge-pill">Registry {{ registryUrl || '未配置' }}</span>
-        <span v-if="namespacePrefix" class="badge-pill">Namespace {{ namespacePrefix }}</span>
+        <span class="badge-pill">仓库地址 {{ registryUrl || '未配置' }}</span>
+        <span v-if="namespacePrefix" class="badge-pill">命名空间 {{ namespacePrefix }}</span>
       </template>
       <template #actions>
         <el-button type="primary" @click="openImageUploadDialog">
@@ -22,22 +22,22 @@
     </PageHero>
 
     <section class="metrics-grid">
-      <MetricCard label="Repositories" :value="totalRepositories" hint="已发现的 Registry 仓库数量" tone="brand">
+      <MetricCard label="仓库数量" :value="totalRepositories" hint="已发现的 Registry 仓库数量" tone="brand">
         <template #icon>
           <el-icon :size="28"><Collection /></el-icon>
         </template>
       </MetricCard>
-      <MetricCard label="Tags" :value="totalTags" hint="全部仓库下的标签总数" tone="success">
+      <MetricCard label="标签数量" :value="totalTags" hint="全部仓库下的标签总数" tone="success">
         <template #icon>
           <el-icon :size="28"><PriceTag /></el-icon>
         </template>
       </MetricCard>
-      <MetricCard label="Entries" :value="flatImages.length" hint="展开后的仓库标签条目数" tone="warning">
+      <MetricCard label="镜像条目" :value="flatImages.length" hint="展开后的仓库标签条目数" tone="warning">
         <template #icon>
           <el-icon :size="28"><Files /></el-icon>
         </template>
       </MetricCard>
-      <MetricCard label="Import Modes" value="3" hint="手动构建、压缩包上传、本地目录上传" tone="default">
+      <MetricCard label="导入方式" value="3" hint="手动构建、压缩包上传、本地目录上传" tone="default">
         <template #icon>
           <el-icon :size="28"><Upload /></el-icon>
         </template>
@@ -63,8 +63,8 @@
       />
 
       <el-table :data="flatImages" v-loading="loading" stripe>
-        <el-table-column prop="repository" label="Repository" min-width="260" />
-        <el-table-column prop="tag" label="Tag" width="180">
+        <el-table-column prop="repository" label="仓库名" min-width="260" />
+        <el-table-column prop="tag" label="标签" width="180">
           <template #default="{ row }">
             <el-tag size="small">{{ row.tag }}</el-tag>
           </template>
@@ -126,10 +126,10 @@
             :rules="uploadRules"
             label-width="120px"
           >
-            <el-form-item label="Repository" prop="repository">
+            <el-form-item label="仓库名" prop="repository">
               <el-input v-model="uploadForm.repository" placeholder="如：ai-model/my-runtime" />
             </el-form-item>
-            <el-form-item label="Tag" prop="tag">
+            <el-form-item label="标签" prop="tag">
               <el-input v-model="uploadForm.tag" placeholder="如：v1 或 20260511" />
             </el-form-item>
             <el-form-item label="镜像文件" prop="file">
@@ -168,10 +168,10 @@
             :rules="localUploadRules"
             label-width="120px"
           >
-            <el-form-item label="Repository" prop="repository">
+            <el-form-item label="仓库名" prop="repository">
               <el-input v-model="localUploadForm.repository" placeholder="如：ai-model/my-runtime" />
             </el-form-item>
-            <el-form-item label="Tag" prop="tag">
+            <el-form-item label="标签" prop="tag">
               <el-input v-model="localUploadForm.tag" placeholder="如：v1 或 20260511" />
             </el-form-item>
             <el-form-item label="镜像包" prop="package_path">

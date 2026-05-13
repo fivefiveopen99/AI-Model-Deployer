@@ -41,7 +41,7 @@ defineProps({
   min-height: 96px;
   padding: 14px;
   border-radius: 8px;
-  background: #fff;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 251, 255, 0.98));
   border: 1px solid var(--ui-border);
   box-shadow: none;
   overflow: hidden;
@@ -60,8 +60,8 @@ defineProps({
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--ui-surface-muted);
-  box-shadow: none;
+  background: var(--ui-brand-soft);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 .metric-card__content {
@@ -92,17 +92,17 @@ defineProps({
 
 .metric-card--brand .metric-card__icon {
   color: var(--ui-brand);
-  background: rgba(45, 108, 150, 0.12);
+  background: #e2efff;
 }
 
 .metric-card--success .metric-card__icon {
-  color: var(--ui-success);
-  background: rgba(47, 125, 83, 0.12);
+  color: #1162c4;
+  background: #e7f1ff;
 }
 
 .metric-card--warning .metric-card__icon {
-  color: var(--ui-warning);
-  background: rgba(155, 106, 18, 0.12);
+  color: #315fba;
+  background: #edf4ff;
 }
 
 .metric-card--danger .metric-card__icon {
@@ -111,7 +111,7 @@ defineProps({
 }
 
 .metric-card--default .metric-card__icon {
-  color: var(--ui-text);
-  background: rgba(98, 110, 116, 0.08);
+  color: var(--ui-brand-strong);
+  background: #f1f6ff;
 }
 </style>

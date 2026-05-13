@@ -4,7 +4,6 @@
       <slot name="header">
         <div class="panel-card__header">
           <div class="panel-card__copy">
-            <span v-if="eyebrow" class="panel-card__eyebrow">{{ eyebrow }}</span>
             <h2 v-if="title">{{ title }}</h2>
           </div>
           <div v-if="$slots.actions" class="panel-card__actions">
@@ -44,16 +43,6 @@ defineProps({
 
 .panel-card__copy {
   min-width: 0;
-}
-
-.panel-card__eyebrow {
-  display: inline-block;
-  margin-bottom: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0;
-  text-transform: none;
-  color: var(--ui-text-faint);
 }
 
 .panel-card__copy h2 {

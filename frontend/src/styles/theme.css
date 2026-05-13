@@ -3,30 +3,30 @@
   --ui-font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", "Segoe UI", sans-serif;
   --ui-font-display: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", "Segoe UI", sans-serif;
   --ui-font-mono: "SFMono-Regular", "JetBrains Mono", "Cascadia Code", "Consolas", monospace;
-  --ui-bg: #f4f8fb;
-  --ui-bg-soft: #edf5f7;
+  --ui-bg: #eef6ff;
+  --ui-bg-soft: #e4f0ff;
   --ui-surface: #ffffff;
   --ui-surface-strong: #ffffff;
-  --ui-surface-muted: #f8fbfc;
-  --ui-sidebar: #e9f6f3;
-  --ui-sidebar-strong: #d8efe9;
-  --ui-border: #d9e6ea;
-  --ui-border-strong: #c1d7dd;
-  --ui-text: #14252d;
-  --ui-text-soft: #4f646e;
-  --ui-text-faint: #7d929b;
-  --ui-brand: #1f7a8c;
-  --ui-brand-strong: #155f70;
-  --ui-brand-soft: #e2f3f5;
-  --ui-success: #238457;
-  --ui-success-soft: #e2f4ec;
-  --ui-warning: #9a6a13;
-  --ui-warning-soft: #fff4da;
-  --ui-danger: #c45151;
-  --ui-danger-soft: #fdecec;
-  --ui-shadow-lg: 0 12px 28px rgba(20, 37, 45, 0.08);
-  --ui-shadow-md: 0 6px 18px rgba(20, 37, 45, 0.06);
-  --ui-shadow-sm: 0 2px 8px rgba(20, 37, 45, 0.05);
+  --ui-surface-muted: #f5f9ff;
+  --ui-sidebar: #e6f2ff;
+  --ui-sidebar-strong: #d3e8ff;
+  --ui-border: #cfe0f4;
+  --ui-border-strong: #a9c7ec;
+  --ui-text: #0d2238;
+  --ui-text-soft: #435f7c;
+  --ui-text-faint: #7590ad;
+  --ui-brand: #1d6fd7;
+  --ui-brand-strong: #0f4fa8;
+  --ui-brand-soft: #e3efff;
+  --ui-success: #14785d;
+  --ui-success-soft: #e0f5ef;
+  --ui-warning: #a56a00;
+  --ui-warning-soft: #fff3d6;
+  --ui-danger: #c83f4d;
+  --ui-danger-soft: #fde9ed;
+  --ui-shadow-lg: 0 12px 28px rgba(22, 72, 139, 0.12);
+  --ui-shadow-md: 0 6px 18px rgba(22, 72, 139, 0.09);
+  --ui-shadow-sm: 0 2px 8px rgba(22, 72, 139, 0.07);
   --ui-radius-xl: 8px;
   --ui-radius-lg: 8px;
   --ui-radius-md: 6px;
@@ -55,7 +55,7 @@ body {
   margin: 0;
   font-family: var(--ui-font-sans);
   color: var(--ui-text);
-  background: var(--ui-bg);
+  background: linear-gradient(180deg, #eef6ff 0%, #f8fbff 48%, #edf5ff 100%);
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -194,8 +194,8 @@ select {
 .terminal-shell {
   border-radius: 8px;
   overflow: hidden;
-  border: 1px solid rgba(29, 44, 53, 0.12);
-  background: #172028;
+  border: 1px solid rgba(24, 82, 153, 0.14);
+  background: #102943;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
@@ -205,10 +205,10 @@ select {
   justify-content: space-between;
   min-height: 42px;
   padding: 0 14px;
-  background: rgba(250, 252, 248, 0.96);
+  background: rgba(247, 251, 255, 0.96);
   color: var(--ui-text-soft);
   font-size: 12px;
-  border-bottom: 1px solid rgba(29, 44, 53, 0.08);
+  border-bottom: 1px solid rgba(24, 82, 153, 0.1);
 }
 
 .terminal-body {
@@ -317,7 +317,7 @@ select {
   min-height: 30px;
   padding: 0 11px;
   border-radius: 6px;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.92);
   border: 1px solid var(--ui-border);
   color: var(--ui-text-soft);
   font-size: 12px;
@@ -395,7 +395,7 @@ select {
 .el-card__header,
 .el-dialog__header,
 .el-drawer__header {
-  border-bottom: 1px solid rgba(70, 82, 88, 0.08) !important;
+  border-bottom: 1px solid rgba(27, 86, 159, 0.1) !important;
 }
 
 .el-dialog,
@@ -404,7 +404,7 @@ select {
 }
 
 .el-overlay {
-  background: rgba(20, 37, 45, 0.24) !important;
+  background: rgba(13, 34, 56, 0.28) !important;
 }
 
 .el-table,
@@ -508,7 +508,7 @@ select {
 }
 
 .el-table .el-table__row:hover > td.el-table__cell {
-  background: rgba(45, 108, 150, 0.04) !important;
+  background: rgba(29, 111, 215, 0.05) !important;
 }
 
 .el-tag {

@@ -6,7 +6,7 @@ Scope note: the current workspace does not contain the original uploaded model p
 
 ## Repository Context
 
-- Platform: AI Model Deployer.
+- Platform: OG-MAP.
 - Backend build entry: `backend/app/services/docker_service.py`.
 - Build task orchestration: `backend/app/api/models.py`.
 - Uploaded or imported model archives are copied into a temporary Docker build context under `data/builds/{build_id}`.

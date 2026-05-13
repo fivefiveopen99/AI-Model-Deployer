@@ -1,4 +1,4 @@
-# AI Model Deployer
+# OG-MAP
 
 AI模型打包部署平台 - 支持将AI模型打包成Docker镜像并部署到Kubernetes集群。
 
