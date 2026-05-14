@@ -3,7 +3,7 @@
     <PageHero
       eyebrow="模型资产"
       title="模型管理台"
-      description="统一管理导入、上传、构建与重置状态。列表保留业务操作密度，但视觉和信息层级统一到新版控制台。"
+      description="统一管理导入、上传、构建与重置状态。"
     >
       <template #meta>
         <span class="badge-pill">总数 {{ modelsStore.total }}</span>

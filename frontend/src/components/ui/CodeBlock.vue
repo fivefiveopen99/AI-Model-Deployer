@@ -18,10 +18,10 @@ defineProps({
 <style scoped>
 .code-block {
   margin: 0;
-  padding: 16px;
-  border-radius: 8px;
+  padding: 18px 20px;
+  border-radius: 18px;
   border: 1px solid var(--ui-border);
-  background: rgba(248, 249, 245, 0.94);
+  background: linear-gradient(180deg, rgba(249, 250, 253, 0.98), rgba(244, 247, 251, 0.96));
   color: var(--ui-text);
   font-family: var(--ui-font-mono);
   font-size: 12px;
@@ -32,8 +32,8 @@ defineProps({
 }
 
 .code-block--terminal {
-  border-color: rgba(29, 44, 53, 0.12);
-  background: #172028;
-  color: #dce8f0;
+  border-color: rgba(18, 24, 37, 0.08);
+  background: linear-gradient(180deg, #121826, #1a2435);
+  color: #dde7f5;
 }
 </style>

@@ -1,12 +1,12 @@
 <template>
   <div class="page-shell deployment-inference-page">
     <PageHero
-      eyebrow="Command Workbench"
+      eyebrow="命令工作台"
       :title="deployment?.name || '命令工作台'"
       description="面向镜像部署的命令执行工作台，统一查看变量输入、实时输出和结果文件。"
     >
       <template #meta v-if="deployment">
-        <span class="badge-pill">Status {{ getDeploymentStatusText(deployment.status) }}</span>
+        <span class="badge-pill">状态 {{ getDeploymentStatusText(deployment.status) }}</span>
         <span class="badge-pill">{{ deployment.image || '镜像命令工作台' }}</span>
       </template>
       <template #actions>
@@ -32,7 +32,7 @@
       />
       <template v-else>
         <PanelCard
-          eyebrow="Command"
+          eyebrow="命令配置"
           title="命令模板与运行配置"
           description="先检查命令模板、结果目录和部署运行态，再执行任务。"
         >
@@ -48,11 +48,11 @@
           <div class="section-subtitle">命令模板</div>
           <CodeBlock :content="inferenceConfig.command_template" />
 
-          <el-descriptions :column="2" border class="meta-table">
-            <el-descriptions-item label="访问模式">
-              平台命令工作台
-            </el-descriptions-item>
-            <el-descriptions-item label="K8s Deployment">
+            <el-descriptions :column="2" border class="meta-table">
+              <el-descriptions-item label="访问模式">
+                平台命令工作台
+              </el-descriptions-item>
+            <el-descriptions-item label="K8s 部署">
               {{ deployment.k8s_deployment_name || '-' }}
             </el-descriptions-item>
             <el-descriptions-item label="结果目录">
@@ -104,7 +104,7 @@
 
         <PanelCard
           v-if="inferenceResult"
-          eyebrow="Result"
+          eyebrow="运行结果"
           title="最近一次运行结果"
           description="结果摘要、实时输出与文件浏览放在同一个工作台中。"
         >

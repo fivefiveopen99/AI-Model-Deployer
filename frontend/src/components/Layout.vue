@@ -24,7 +24,7 @@
         </div>
         <div class="sidebar-brand__copy">
           <strong>OG-MAP</strong>
-          <span class="sidebar-brand__subtitle">Model Application Platform</span>
+          <span class="sidebar-brand__subtitle">模型应用平台</span>
           <span class="sidebar-brand__subtitle sidebar-brand__subtitle--cn">奥工模型应用平台</span>
         </div>
       </div>
@@ -42,21 +42,20 @@
           <el-icon><component :is="item.icon" /></el-icon>
           <span class="sidebar-menu__label">{{ item.label }}</span>
         </el-menu-item>
-        <el-menu-item index="/images">
-          <el-icon><Collection /></el-icon>
-          <span>镜像管理</span>
-        </el-menu-item>
       </el-menu>
     </aside>
 
     <div class="layout-main">
       <header class="layout-topbar">
         <div class="layout-topbar__left">
-          <el-button class="mobile-nav-button" circle @click="mobileDrawerVisible = true">
+          <el-button v-if="!hideSidebar" class="mobile-nav-button" circle @click="mobileDrawerVisible = true">
             <el-icon><Operation /></el-icon>
           </el-button>
-          <div>
+          <div class="layout-topbar__copy">
             <div class="layout-topbar__title">{{ currentMeta.navLabel }}</div>
+            <p v-if="currentMeta.navDescription" class="layout-topbar__description">
+              {{ currentMeta.navDescription }}
+            </p>
           </div>
         </div>
         <div class="layout-topbar__right">
@@ -88,7 +87,7 @@
       <template #header>
         <div class="mobile-drawer__header">
           <strong>OG-MAP</strong>
-          <span class="mobile-drawer__subtitle">Model Application Platform</span>
+          <span class="mobile-drawer__subtitle">模型应用平台</span>
           <span class="mobile-drawer__subtitle mobile-drawer__subtitle--cn">奥工模型应用平台</span>
         </div>
       </template>
@@ -150,9 +149,9 @@ onMounted(() => {
   z-index: 1;
   display: grid;
   grid-template-columns: 198px minmax(0, 1fr);
-  gap: 16px;
+  gap: 20px;
   height: 100vh;
-  padding: 14px;
+  padding: 16px;
   overflow: hidden;
 }
 
@@ -163,37 +162,37 @@ onMounted(() => {
 .layout-sidebar {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  height: calc(100vh - 28px);
-  padding: 10px;
-  border-radius: 8px;
+  gap: 18px;
+  height: calc(100vh - 32px);
+  padding: 18px 14px;
+  border-radius: 24px;
   background: var(--ui-sidebar);
-  border: 1px solid rgba(29, 111, 215, 0.14);
-  box-shadow: none;
+  border: 1px solid rgba(151, 168, 197, 0.22);
+  box-shadow: var(--ui-shadow-sm);
   overflow: hidden;
 }
 
 .sidebar-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-bottom: 14px;
-  border-bottom: 1px solid rgba(29, 111, 215, 0.12);
+  gap: 10px;
+  padding: 0 4px 14px;
+  border-bottom: 1px solid rgba(151, 168, 197, 0.22);
 }
 
 .sidebar-brand__mark {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 54px;
-  height: 34px;
-  flex: 0 0 54px;
+  width: 60px;
+  height: 38px;
+  flex: 0 0 60px;
 }
 
 .sidebar-brand__logo {
   display: block;
-  width: 54px;
-  height: 34px;
+  width: 60px;
+  height: 38px;
 }
 
 .sidebar-brand__copy {
@@ -207,18 +206,19 @@ onMounted(() => {
 }
 
 .sidebar-brand__copy strong {
-  font-size: 18px;
+  font-size: 19px;
   line-height: 1.05;
+  letter-spacing: -0.02em;
   color: var(--ui-text);
 }
 
 .sidebar-brand__subtitle {
   display: block;
   max-width: 100%;
-  font-size: 8.5px;
+  font-size: 10px;
   letter-spacing: 0;
   color: var(--ui-text-faint);
-  line-height: 1.15;
+  line-height: 1.3;
   white-space: nowrap;
 }
 
@@ -240,13 +240,14 @@ onMounted(() => {
   display: grid;
   grid-template-columns: 28px minmax(0, 1fr);
   align-items: center;
-  height: 44px;
-  min-height: 44px;
+  height: 48px;
+  min-height: 48px;
   line-height: 1;
   margin-bottom: 8px;
-  padding: 0 12px !important;
-  border-radius: 6px;
+  padding: 0 14px !important;
+  border-radius: 14px;
   color: var(--ui-text-soft);
+  font-weight: 600;
 }
 
 .sidebar-menu :deep(.el-menu-item .el-icon) {
@@ -255,14 +256,14 @@ onMounted(() => {
 }
 
 .sidebar-menu :deep(.el-menu-item:hover) {
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(34, 104, 255, 0.06);
   color: var(--ui-text);
 }
 
 .sidebar-menu :deep(.el-menu-item.is-active) {
   background: var(--ui-sidebar-strong);
   color: var(--ui-brand-strong);
-  box-shadow: none;
+  box-shadow: inset 0 0 0 1px rgba(34, 104, 255, 0.08);
 }
 
 .sidebar-menu__label {
@@ -276,20 +277,20 @@ onMounted(() => {
 
 .layout-main {
   min-width: 0;
-  height: calc(100vh - 28px);
+  height: calc(100vh - 32px);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 18px;
   overflow: hidden;
 }
 
 .layout-topbar {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  min-height: 64px;
-  padding: 0 8px 0 6px;
-  gap: 12px;
+  min-height: 72px;
+  padding: 6px 6px 0;
+  gap: 16px;
 }
 
 .layout-topbar__left,
@@ -300,12 +301,25 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
+.layout-topbar__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .layout-topbar__title {
   margin-top: 0;
   font-family: var(--ui-font-display);
-  font-size: 24px;
-  line-height: 1;
-  letter-spacing: 0;
+  font-size: 28px;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.layout-topbar__description {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ui-text-soft);
 }
 
 .layout-content {
@@ -339,7 +353,7 @@ onMounted(() => {
 .mobile-drawer__header {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 6px;
 }
 
 .mobile-drawer__subtitle {

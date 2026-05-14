@@ -1,8 +1,9 @@
 <template>
   <div class="page-shell dashboard-page">
     <PageHero
+      eyebrow="平台总览"
       title="模型交付控制台"
-      description="查看模型、部署和集群状态。"
+      description="集中查看模型资产、部署运行和集群连接情况，并从这里快速进入导入、镜像和部署操作。"
     >
       <template #meta>
         <span class="badge-pill">模型 {{ systemStore.status.total_models }}</span>
@@ -29,6 +30,7 @@
       <MetricCard
         label="模型总数"
         :value="systemStore.status.total_models"
+        hint="已登记到平台、可继续构建或管理的模型资产数量。"
         tone="brand"
       >
         <template #icon>
@@ -38,6 +40,7 @@
       <MetricCard
         label="部署总数"
         :value="systemStore.status.total_deployments"
+        hint="当前平台内已创建的全部部署记录。"
         tone="success"
       >
         <template #icon>
@@ -47,6 +50,7 @@
       <MetricCard
         label="运行中"
         :value="systemStore.status.running_deployments"
+        hint="已经成功部署并处于运行状态的服务数量。"
         tone="warning"
       >
         <template #icon>
@@ -56,6 +60,7 @@
       <MetricCard
         label="可部署模型"
         :value="readyModelsCount"
+        hint="镜像已准备完成，可直接创建部署的模型数量。"
         tone="default"
       >
         <template #icon>
@@ -66,8 +71,9 @@
 
     <section class="two-column-grid">
       <PanelCard
+        eyebrow="系统状态"
         title="系统连接状态"
-        description=""
+        description="先确认 Kubernetes 连接和当前工作负载，再决定下一步是导入、构建还是直接部署。"
       >
         <div class="status-stack">
           <div class="status-row">
@@ -90,8 +96,9 @@
       </PanelCard>
 
       <PanelCard
+        eyebrow="快捷入口"
         title="推荐操作路径"
-        description=""
+        description="围绕“导入模型、管理镜像、创建部署”三条高频路径组织入口，减少页面切换成本。"
       >
         <div class="action-grid">
           <button class="action-tile" type="button" @click="router.push('/models')">
@@ -115,8 +122,9 @@
 
     <section class="two-column-grid">
       <PanelCard
+        eyebrow="最近活动"
         title="最近模型"
-        description=""
+        description="优先展示最新导入或最近变更的模型，便于快速回到正在处理的资产。"
       >
         <template #actions>
           <el-button text @click="router.push('/models')">查看全部</el-button>
@@ -146,8 +154,9 @@
       </PanelCard>
 
       <PanelCard
+        eyebrow="最近活动"
         title="最近部署"
-        description=""
+        description="持续跟踪最近的部署记录和当前运行状态，减少在列表页中翻找。"
       >
         <template #actions>
           <el-button text @click="router.push('/deployments')">查看全部</el-button>
@@ -221,23 +230,23 @@ onMounted(() => {
 
 <style scoped>
 .dashboard-page {
-  padding: 0 0 6px;
-  gap: 12px;
+  padding: 0 0 10px;
+  gap: 20px;
 }
 
 .status-stack {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 .status-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
-  padding: 12px 0;
-  border-bottom: 1px solid rgba(27, 86, 159, 0.1);
+  gap: 18px;
+  padding: 18px 0;
+  border-bottom: 1px solid rgba(151, 168, 197, 0.2);
 }
 
 .status-row:last-child {
@@ -247,63 +256,67 @@ onMounted(() => {
 
 .status-row strong {
   display: block;
-  margin-bottom: 4px;
-  font-size: 14px;
+  margin-bottom: 6px;
+  font-size: 15px;
+  color: var(--ui-text);
 }
 
 .status-row p {
   margin: 0;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.7;
   color: var(--ui-text-soft);
 }
 
 .action-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: 14px;
 }
 
 .action-tile {
   width: 100%;
-  padding: 14px;
+  padding: 18px;
   border: 1px solid var(--ui-border);
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(242, 247, 255, 0.96));
+  border-radius: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(247, 249, 253, 0.96));
   text-align: left;
   color: var(--ui-text);
   cursor: pointer;
-  box-shadow: none;
-  transition: border-color 0.16s ease, background-color 0.16s ease;
+  box-shadow: var(--ui-shadow-sm);
+  transition: transform 0.18s ease, border-color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease;
 }
 
 .action-tile:hover {
-  border-color: rgba(42, 115, 209, 0.32);
+  transform: translateY(-2px);
+  border-color: rgba(34, 104, 255, 0.22);
   background: #fff;
+  box-shadow: var(--ui-shadow-md);
 }
 
 .action-tile__icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
-  margin-bottom: 8px;
-  border-radius: 6px;
+  width: 42px;
+  height: 42px;
+  margin-bottom: 12px;
+  border-radius: 14px;
   color: var(--ui-brand);
   background: var(--ui-brand-soft);
 }
 
 .action-tile strong {
   display: block;
-  font-size: 15px;
+  font-size: 16px;
+  letter-spacing: -0.01em;
 }
 
 .action-tile p {
-  margin: 6px 0 0;
+  margin: 8px 0 0;
   color: var(--ui-text-soft);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.65;
 }
 
 .dashboard-table {
@@ -311,11 +324,11 @@ onMounted(() => {
 }
 
 .dashboard-page :deep(.panel-card .el-card__header) {
-  padding: 14px 16px;
+  padding: 20px 22px 0;
 }
 
 .dashboard-page :deep(.panel-card .el-card__body) {
-  padding: 14px 16px 16px;
+  padding: 18px 22px 22px;
 }
 
 .dashboard-page :deep(.el-table td.el-table__cell) {

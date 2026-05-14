@@ -1,7 +1,7 @@
 <template>
   <div class="page-shell registry-images-page">
     <PageHero
-      eyebrow="Registry Workspace"
+      eyebrow="镜像仓库"
       title="镜像仓库管理"
       description="统一查看私有 Registry 中的仓库、标签和导入入口，同时保留手动构建与本地镜像上传流程。"
     >
@@ -45,7 +45,7 @@
     </section>
 
     <PanelCard
-      eyebrow="Registry Inventory"
+      eyebrow="仓库清单"
       title="镜像列表"
       description="镜像浏览、删除与导入都在同一个面板里完成，避免在工具页之间跳转。"
     >

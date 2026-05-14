@@ -1,14 +1,14 @@
 <template>
   <div class="page-shell deployment-detail-page">
     <PageHero
-      eyebrow="Deployment Detail"
+      eyebrow="部署详情"
       :title="deployment?.name || '部署详情'"
-      description="统一查看部署来源、资源配置、Kubernetes 运行态和访问入口，同时把高频动作收敛到页头。"
+      description="集中查看部署来源、资源配置、Kubernetes 运行情况和访问入口，便于在一个页面完成排查和后续操作。"
     >
       <template #meta v-if="deployment">
-        <span class="badge-pill">Namespace {{ deployment.namespace }}</span>
-        <span class="badge-pill">Status {{ getDeploymentStatusText(deployment.status) }}</span>
-        <span class="badge-pill">Replicas {{ deployment.replicas }}</span>
+        <span class="badge-pill">命名空间 {{ deployment.namespace }}</span>
+        <span class="badge-pill">状态 {{ getDeploymentStatusText(deployment.status) }}</span>
+        <span class="badge-pill">副本数 {{ deployment.replicas }}</span>
       </template>
       <template #actions>
         <el-button @click="$router.back()">返回</el-button>
@@ -38,29 +38,29 @@
 
     <template v-if="deployment">
       <section class="metrics-grid">
-        <MetricCard label="Deployment ID" :value="deployment.id" hint="平台内部部署主键" tone="brand">
+        <MetricCard label="部署编号" :value="deployment.id" hint="平台内部用于追踪部署记录的唯一编号。" tone="brand">
           <template #icon>
             <el-icon :size="28"><Key /></el-icon>
           </template>
         </MetricCard>
         <MetricCard
-          label="Source"
+          label="部署来源"
           :value="deployment.source_type === 'image' ? '镜像' : '模型'"
-          hint="决定部署来源和运行配置结构"
+          hint="决定当前部署来自模型服务还是镜像工作台路径。"
           tone="success"
         >
           <template #icon>
             <el-icon :size="28"><Collection /></el-icon>
           </template>
         </MetricCard>
-        <MetricCard label="Replicas" :value="deployment.replicas" hint="当前数据库中的目标副本数" tone="warning">
+        <MetricCard label="副本数量" :value="deployment.replicas" hint="当前数据库中记录的目标副本数。" tone="warning">
           <template #icon>
             <el-icon :size="28"><Grid /></el-icon>
           </template>
         </MetricCard>
         <MetricCard
-          label="Endpoint"
-          :value="deployment.endpoint ? 'Ready' : 'Pending'"
+          label="服务入口"
+          :value="deployment.endpoint ? '已生成' : '待生成'"
           :hint="deployment.endpoint || deployment.access_path || '尚未生成访问地址'"
           tone="default"
         >
@@ -72,7 +72,7 @@
 
       <section class="split-detail-layout">
         <div class="content-stack">
-          <PanelCard eyebrow="Overview" title="基础信息" description="部署来源、命名空间、副本数和创建时间。">
+          <PanelCard eyebrow="概览信息" title="基础信息" description="集中展示部署来源、命名空间、副本数和创建时间。">
             <el-descriptions :column="2" border>
               <el-descriptions-item label="ID">{{ deployment.id }}</el-descriptions-item>
               <el-descriptions-item label="部署来源">
@@ -102,7 +102,7 @@
             </el-descriptions>
           </PanelCard>
 
-          <PanelCard eyebrow="Routing" title="访问与服务入口" description="统一放置页面访问地址和服务端点。">
+          <PanelCard eyebrow="访问入口" title="访问与服务入口" description="统一展示页面访问地址、服务端点和 Kubernetes 对象信息。">
             <div class="field-stack">
               <div v-if="deployment.access_path">
                 <div class="section-heading">访问地址</div>
@@ -123,10 +123,10 @@
               <div v-if="deployment.k8s_deployment_name">
                 <div class="section-heading">Kubernetes 对象</div>
                 <el-descriptions :column="1" border>
-                  <el-descriptions-item label="Deployment 名称">
+                  <el-descriptions-item label="部署名称">
                     {{ deployment.k8s_deployment_name }}
                   </el-descriptions-item>
-                  <el-descriptions-item v-if="deployment.k8s_service_name" label="Service 名称">
+                  <el-descriptions-item v-if="deployment.k8s_service_name" label="服务名称">
                     {{ deployment.k8s_service_name }}
                   </el-descriptions-item>
                 </el-descriptions>
@@ -134,7 +134,7 @@
             </div>
           </PanelCard>
 
-          <PanelCard eyebrow="Logs" title="Pod 日志" description="直接查看当前部署的日志输出。">
+          <PanelCard eyebrow="运行日志" title="容器日志" description="直接查看当前部署的日志输出，用于排查运行状态和错误信息。">
             <div class="logs-header">
               <el-input-number v-model="tailLines" :min="10" :max="1000" :step="10" size="small" />
               <el-button size="small" @click="fetchLogs" :loading="logsLoading">
@@ -147,21 +147,21 @@
         </div>
 
         <div class="content-stack">
-          <PanelCard eyebrow="Runtime" title="资源配置" description="部署时写入的资源请求与限制。">
+          <PanelCard eyebrow="运行配置" title="资源配置" description="展示部署时写入的资源请求和资源限制。">
             <CodeBlock :content="resourcesText" />
           </PanelCard>
 
-          <PanelCard eyebrow="Storage" title="挂载配置" description="NFS 或其他挂载结构。">
+          <PanelCard eyebrow="存储挂载" title="挂载配置" description="展示 NFS 或其他挂载结构，便于核对路径。">
             <CodeBlock :content="mountText" />
           </PanelCard>
 
-          <PanelCard eyebrow="Environment" title="环境变量" description="传递到容器运行时的环境变量。">
+          <PanelCard eyebrow="环境变量" title="环境变量" description="展示传递到容器运行时的环境变量内容。">
             <CodeBlock :content="envText" />
           </PanelCard>
 
           <PanelCard
             v-if="deployment.source_type === 'image'"
-            eyebrow="Workbench"
+            eyebrow="命令工作台"
             title="命令工作台配置"
             description="镜像部署下可选的命令模板和结果目录。"
           >
@@ -186,7 +186,7 @@
 
           <PanelCard
             v-if="deployment.status_message"
-            eyebrow="Status"
+            eyebrow="状态补充"
             title="状态信息"
             description="部署阶段的错误或附加提示。"
           >

@@ -1,6 +1,7 @@
 <template>
   <div class="page-shell deployments-page">
     <PageHero
+      class="deployments-hero"
       eyebrow="部署中心"
       title="部署管理中心"
       description="把模型部署、镜像部署、资源配置和访问入口收敛在同一条交付路径里。"
@@ -997,42 +998,12 @@ const stopPolling = () => {
   gap: 14px;
 }
 
-.page-hero {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 2px 2px 0;
+.deployments-page :deep(.deployments-hero .page-hero__copy) {
+  padding-left: 0;
 }
 
-.hero-copy {
-  max-width: 520px;
-}
-
-.hero-eyebrow,
-.section-eyebrow {
-  display: inline-block;
-  margin-bottom: 10px;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: #86868b;
-}
-
-.hero-copy h1 {
-  margin: 0;
-  font-size: 30px;
-  line-height: 1.14;
-  letter-spacing: -0.04em;
-  color: #1d1d1f;
-}
-
-.hero-actions {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  flex-wrap: wrap;
+.deployments-page :deep(.deployments-hero .page-hero__meta) {
+  margin-left: 0;
 }
 
 .hero-primary,
@@ -1312,22 +1283,13 @@ const stopPolling = () => {
     --el-dialog-margin-top: 4vh;
   }
 
-  .page-hero,
   .shell-header {
     flex-direction: column;
     align-items: flex-start;
   }
-
-  .hero-copy h1 {
-    font-size: 28px;
-  }
 }
 
 @media (max-width: 720px) {
-  .hero-actions {
-    width: 100%;
-  }
-
   .hero-primary,
   .hero-secondary {
     flex: 1 1 0;

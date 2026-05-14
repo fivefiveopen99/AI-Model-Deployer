@@ -1,14 +1,14 @@
 <template>
   <div class="page-shell model-playground-page">
     <PageHero
-      eyebrow="Interactive Playground"
+      eyebrow="交互测试"
       :title="deployment?.name || '模型交互测试'"
       description="统一测试模型服务端点、请求参数和返回结果，避免在外部工具和平台页面之间来回切换。"
     >
       <template #meta v-if="deployment">
-        <span class="badge-pill">Status {{ getDeploymentStatusText(deployment.status) }}</span>
+        <span class="badge-pill">状态 {{ getDeploymentStatusText(deployment.status) }}</span>
         <span class="badge-pill">{{ modelProfile.label }}</span>
-        <span class="badge-pill">{{ deployment.endpoint ? 'Endpoint Ready' : 'Pending Deploy' }}</span>
+        <span class="badge-pill">{{ deployment.endpoint ? '服务已就绪' : '等待部署完成' }}</span>
       </template>
       <template #actions>
         <el-button @click="$router.back()">返回</el-button>
@@ -21,7 +21,7 @@
 
     <template v-if="deployment">
       <PanelCard
-        eyebrow="Service"
+        eyebrow="服务状态"
         title="端点与健康检查"
         description="先确认部署服务已经可访问，再进入具体请求。"
       >
@@ -61,7 +61,7 @@
 
       <PanelCard
         v-if="deployment.endpoint"
-        eyebrow="Request"
+        eyebrow="请求配置"
         :title="modelProfile.title"
         :description="modelProfile.description"
       >
@@ -158,7 +158,7 @@
 
       <PanelCard
         v-if="predictResult"
-        eyebrow="Response"
+        eyebrow="返回结果"
         title="预测结果"
         description="结果摘要、结构化表格和原始返回值集中查看。"
       >
