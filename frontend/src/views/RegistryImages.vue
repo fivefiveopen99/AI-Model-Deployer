@@ -21,7 +21,7 @@
       </template>
     </PageHero>
 
-    <section class="metrics-grid">
+    <section class="metrics-grid three-column-grid">
       <MetricCard label="仓库数量" :value="totalRepositories" hint="已发现的 Registry 仓库数量" tone="brand">
         <template #icon>
           <el-icon :size="28"><Collection /></el-icon>
@@ -35,11 +35,6 @@
       <MetricCard label="镜像条目" :value="flatImages.length" hint="展开后的仓库标签条目数" tone="warning">
         <template #icon>
           <el-icon :size="28"><Files /></el-icon>
-        </template>
-      </MetricCard>
-      <MetricCard label="导入方式" value="3" hint="手动构建、压缩包上传、本地目录上传" tone="default">
-        <template #icon>
-          <el-icon :size="28"><Upload /></el-icon>
         </template>
       </MetricCard>
     </section>

@@ -317,7 +317,7 @@
         :title="isFinetuneModel(currentModel) ? '微调运行时构建说明' : '构建说明'"
         :description="isFinetuneModel(currentModel)
           ? '将直接使用你填写的 Dockerfile 构建镜像；如果上传了模型目录，也会一并进入构建上下文。构建完成后镜像会推送到内置 Registry。'
-          : '系统将自动检测模型类型并安装所需依赖。构建完成后，镜像将推送到内置 Registry：10.10.25.69:5000/ai-models，并由 Kubernetes 节点按需拉取。'"
+          : '系统将自动检测模型类型并安装所需依赖。构建完成后，镜像将推送到内置 Registry，并由 Kubernetes 节点按需拉取。'"
         type="info"
         show-icon
         :closable="false"

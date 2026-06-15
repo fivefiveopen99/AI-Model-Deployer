@@ -34,16 +34,6 @@ export const useSystemStore = defineStore('system', () => {
     }
   }
 
-  const healthCheck = async () => {
-    try {
-      const response = await systemApi.healthCheck()
-      return response.data
-    } catch (error) {
-      console.error('Health check failed:', error)
-      throw error
-    }
-  }
-
   return {
     status,
     loading,
@@ -51,7 +41,6 @@ export const useSystemStore = defineStore('system', () => {
     isDockerConnected,
     isK8sConnected,
     isLoading,
-    fetchStatus,
-    healthCheck
+    fetchStatus
   }
 })

@@ -167,16 +167,6 @@ export const useDeploymentsStore = defineStore('deployments', () => {
     }
   }
 
-  const getK8sDeployments = async (namespace) => {
-    try {
-      const response = await deploymentsApi.getK8sList(namespace)
-      return response.data
-    } catch (error) {
-      console.error('Failed to get K8s deployments:', error)
-      throw error
-    }
-  }
-
   return {
     deployments,
     currentDeployment,
@@ -199,7 +189,6 @@ export const useDeploymentsStore = defineStore('deployments', () => {
     downloadInferenceFile,
     deleteDeployment,
     getDeploymentStatus,
-    getDeploymentLogs,
-    getK8sDeployments
+    getDeploymentLogs
   }
 })

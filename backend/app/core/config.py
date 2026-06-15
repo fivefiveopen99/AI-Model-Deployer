@@ -1,4 +1,5 @@
 from pydantic_settings import BaseSettings
+from pydantic import model_validator
 from typing import Optional, List
 import os
 
@@ -20,7 +21,8 @@ class Settings(BaseSettings):
     
     # Docker Registry Configuration
     LOCAL_IMAGE_PATH: str = "./data/images"
-    DOCKER_REGISTRY_URL: str = "10.10.25.69:5000/ai-models"
+    REGISTRY_HOST_IP: str = "127.0.0.1"
+    DOCKER_REGISTRY_URL: Optional[str] = None
     DOCKER_REGISTRY_PUSH_URL: Optional[str] = "localhost:5000/ai-models"
     DOCKER_REGISTRY_USERNAME: str = ""
     DOCKER_REGISTRY_PASSWORD: str = ""
@@ -41,6 +43,12 @@ class Settings(BaseSettings):
     
     # CORS
     CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:5173"]
+
+    @model_validator(mode="after")
+    def set_default_registry_url(self):
+        if not self.DOCKER_REGISTRY_URL:
+            self.DOCKER_REGISTRY_URL = f"{self.REGISTRY_HOST_IP}:5000/ai-models"
+        return self
     
     class Config:
         env_file = ".env"

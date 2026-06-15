@@ -1,47 +1,47 @@
-# Model Projects FastAPI and Docker Packaging Notes
+# 模型项目 FastAPI 和 Docker 打包说明
 
-This file is a model-readable summary of how the platform wraps known model projects as FastAPI services and packages them into Docker images.
+本文档说明平台如何将已知模型项目包装成 FastAPI 服务，并打包为 Docker 镜像。它面向需要接入、排查或维护模型适配器的开发和运维人员。
 
-Scope note: the current workspace does not contain the original uploaded model project directories under `data/models`, so this analysis is based on the platform's build adapters and generated service templates. The two detailed project adapters below are RCAN and Real-ESRGAN. The codebase also contains a YOLO plate-recognition adapter.
+范围说明：当前工作区不包含用户曾经上传到 `data/models` 下的原始模型项目目录，因此本文主要根据平台现有构建适配器和生成服务模板整理。下文重点说明 RCAN 和 Real-ESRGAN 两个适配器；代码中还包含 YOLO 车牌识别适配器。
 
-## Repository Context
+## 仓库上下文
 
-- Platform: OG-MAP.
-- Backend build entry: `backend/app/services/docker_service.py`.
-- Build task orchestration: `backend/app/api/models.py`.
-- Uploaded or imported model archives are copied into a temporary Docker build context under `data/builds/{build_id}`.
-- Runtime model archives and extracted assets live under `data/`; avoid broad scans because this directory can contain large weights and generated artifacts.
+- 平台名称：OG-MAP。
+- 后端构建入口：`backend/app/services/docker_service.py`。
+- 构建任务编排：`backend/app/api/models.py`。
+- 上传或导入的模型项目会被复制到 `data/builds/{build_id}` 下的临时 Docker 构建上下文。
+- 运行时模型归档、解压资产和权重文件位于 `data/`，该目录可能很大，排查时应避免无目的全量扫描。
 
-## Build Pipeline
+## 构建流程
 
-1. A user uploads or imports a model project through the backend model APIs.
-2. `build_model_task()` in `backend/app/api/models.py` calls `docker_service.build_model_image()`.
-3. `DockerService.build_model_image()` creates a build context:
+1. 用户通过模型 API 上传或导入模型项目。
+2. `backend/app/api/models.py` 中的构建任务调用 `docker_service.build_model_image()`。
+3. `DockerService.build_model_image()` 创建构建上下文：
    - `data/builds/{model_name}_{timestamp}/`
-   - temporary source copy under `data/builds/{build_id}/model/`
-4. `_prepare_model_files()` copies, extracts, or clones the source into the temporary model directory.
-5. `detect_model_type()` performs generic model type detection.
-6. `_select_build_adapter()` checks for specialized project adapters in this order:
-   - user-provided FastAPI project with both `api.py` and `Dockerfile`
-   - YOLO plate recognition project
-   - RCAN super-resolution project
-   - Real-ESRGAN super-resolution project
-   - generic generated service fallback
-7. If an adapter matches:
-   - the original model project is copied to the build context root
-   - generated `api.py` is written into the build context
-   - generated `Dockerfile` is written into the build context
-   - the temporary `model/` copy is removed
-8. Docker builds the image with tag `ai-model:{build_id}`.
-9. The image is tagged as `10.10.25.69:5000/ai-models/ai-model:{build_id}`.
-10. The backend pushes the image to the local Docker Registry service.
-11. The model database row is updated with the registry image name, tag, and status.
+   - 临时源码副本：`data/builds/{build_id}/model/`
+4. `_prepare_model_files()` 将源码复制、解压或克隆到临时模型目录。
+5. `detect_model_type()` 执行通用模型类型检测。
+6. `_select_build_adapter()` 按顺序检查特化适配器：
+   - 用户自带 `api.py` 和 `Dockerfile` 的 FastAPI 项目。
+   - YOLO 车牌识别项目。
+   - RCAN 超分辨率项目。
+   - Real-ESRGAN 超分辨率项目。
+   - 通用生成服务 fallback。
+7. 如果命中特化适配器：
+   - 原始模型项目复制到构建上下文根目录。
+   - 生成的 `api.py` 写入构建上下文。
+   - 生成的 `Dockerfile` 写入构建上下文。
+   - 删除临时 `model/` 副本。
+8. Docker 使用 `ai-model:{build_id}` 作为 tag 构建镜像。
+9. 镜像被重新标记为 `${REGISTRY_HOST_IP}:5000/ai-models/ai-model:{build_id}`。
+10. 后端将镜像推送到本地 Docker Registry 服务。
+11. 模型数据库记录更新 Registry 镜像名、tag 和状态。
 
-## Adapter 1: RCAN Super Resolution
+## 适配器 1：RCAN 超分辨率
 
-### Detection Rules
+### 识别规则
 
-The RCAN adapter matches when a project directory contains all of these files:
+当项目目录同时包含以下文件时，RCAN 适配器会匹配：
 
 ```text
 src/model/rcan.py
@@ -49,31 +49,31 @@ experiment/RCAN/model/model_best.pth
 requirements.txt
 ```
 
-The detector recursively searches inside the uploaded or extracted archive, so the project can be nested under a top-level folder.
+检测逻辑会递归搜索上传或解压后的目录，因此项目可以位于压缩包内的顶层子目录中。
 
-### Validation
+### 校验规则
 
-The adapter requires:
+适配器要求：
 
-- `experiment/RCAN/model/model_best.pth` exists.
-- The weight file is not a Git LFS pointer. Files smaller than 1024 bytes are checked for the `version https://git-lfs.github.com/spec` header.
+- `experiment/RCAN/model/model_best.pth` 必须存在。
+- 权重文件不能是 Git LFS 指针。小于 1024 字节的权重文件会检查是否包含 `version https://git-lfs.github.com/spec` 头。
 
-If the weight is still a Git LFS pointer, the user must run `git lfs pull` before uploading the archive.
+如果权重仍是 Git LFS 指针，用户需要先运行 `git lfs pull`，再上传包含真实权重的压缩包。
 
-### Generated FastAPI Service
+### 生成的 FastAPI 服务
 
-The adapter writes `api.py` from `RCAN_SERVICE_API`.
+适配器会根据 `RCAN_SERVICE_API` 生成 `api.py`。
 
-Service behavior:
+服务行为：
 
-- Imports the project from the container working directory with `sys.path.insert(0, os.getcwd())`.
-- Imports RCAN code as `from src import model as rcan_model`.
-- Loads the model during FastAPI lifespan startup.
-- Uses environment variables:
+- 通过 `sys.path.insert(0, os.getcwd())` 从容器工作目录导入项目。
+- 使用 `from src import model as rcan_model` 导入 RCAN 代码。
+- 在 FastAPI lifespan 启动阶段加载模型。
+- 使用以下环境变量：
   - `RCAN_WEIGHT`, default `experiment/RCAN/model/model_best.pth`
   - `DEVICE`, default `cpu`
   - `RCAN_SCALE`, default `4`
-- Builds an `Args` object that matches the bundled RCAN architecture:
+- 构造匹配项目内 RCAN 架构的 `Args` 对象：
   - `n_resgroups = 10`
   - `n_resblocks = 20`
   - `n_feats = 64`
@@ -82,32 +82,32 @@ Service behavior:
   - `n_colors = 3`
   - `rgb_range = 255`
 
-Endpoints:
+端点：
 
-- `GET /`: returns service name and loaded state.
-- `GET /health`: returns health, model type `rcan`, scale, and device.
-- `POST /predict/image`: accepts multipart image field `file` and optional form field `sharpen`.
-- `POST /predict`: accepts JSON with base64 `image` and optional `parameters.sharpen`.
+- `GET /`: 返回服务名称和加载状态。
+- `GET /health`: 返回健康状态、模型类型 `rcan`、scale 和 device。
+- `POST /predict/image`: 接收 multipart 图片字段 `file`，可选表单字段 `sharpen`。
+- `POST /predict`: 接收 JSON，其中包含 base64 `image`，可选 `parameters.sharpen`。
 
-Output:
+输出：
 
-- PNG image encoded as base64 in `super_resolution_image`.
-- Same base64 output also appears as `processed_image` for frontend compatibility.
-- Includes original and output image dimensions.
+- `super_resolution_image` 中返回 base64 编码的 PNG 图片。
+- 为兼容前端，同一份 base64 输出也会出现在 `processed_image`。
+- 返回原始图片和输出图片尺寸。
 
-### Generated Dockerfile
+### 生成的 Dockerfile
 
-The adapter writes a Dockerfile from `_generate_rcan_dockerfile()`.
+适配器通过 `_generate_rcan_dockerfile()` 生成 Dockerfile。
 
-Default base image:
+默认基础镜像：
 
 ```text
 pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
 ```
 
-The caller can override this by passing a non-default `base_image` or `config.rcan_base_image`.
+调用方可以通过非默认 `base_image` 或 `config.rcan_base_image` 覆盖基础镜像。
 
-Installed OS packages:
+安装的系统包：
 
 ```text
 gcc
@@ -121,7 +121,7 @@ libxrender1
 libgomp1
 ```
 
-Installed Python packages:
+安装的 Python 包：
 
 ```text
 fastapi==0.104.1
@@ -133,23 +133,23 @@ pillow>=7.1.2
 tqdm>=4.60.0
 ```
 
-Runtime command:
+运行命令：
 
 ```text
 python -m uvicorn api:app --host 0.0.0.0 --port {port}
 ```
 
-Healthcheck:
+健康检查：
 
 ```text
 curl -f http://localhost:{port}/health || exit 1
 ```
 
-## Adapter 2: Real-ESRGAN Super Resolution
+## 适配器 2：Real-ESRGAN 超分辨率
 
-### Detection Rules
+### 识别规则
 
-The Real-ESRGAN adapter matches when a project directory contains all of these markers:
+当项目目录包含以下标记时，Real-ESRGAN 适配器会匹配：
 
 ```text
 realesrgan/
@@ -158,38 +158,38 @@ setup.py
 experiments/RealESRGAN_x4plus.pth
 ```
 
-The weight may also be accepted at:
+权重文件也可以位于：
 
 ```text
 weights/RealESRGAN_x4plus.pth
 ```
 
-The detector recursively searches inside the uploaded or extracted archive.
+检测逻辑会递归搜索上传或解压后的目录。
 
-### Validation
+### 校验规则
 
-The adapter requires one of these weight files:
+适配器要求存在以下任一权重文件：
 
 ```text
 experiments/RealESRGAN_x4plus.pth
 weights/RealESRGAN_x4plus.pth
 ```
 
-As with RCAN, small files are checked for Git LFS pointer content. Upload the archive only after real `.pth` weights are present.
+和 RCAN 一样，小文件会检查是否为 Git LFS 指针。请确保真实 `.pth` 权重已经存在后再上传压缩包。
 
-### Generated FastAPI Service
+### 生成的 FastAPI 服务
 
-The adapter writes `api.py` from `REALESRGAN_SERVICE_API`.
+适配器会根据 `REALESRGAN_SERVICE_API` 生成 `api.py`。
 
-Service behavior:
+服务行为：
 
-- Imports `RRDBNet` from `basicsr.archs.rrdbnet_arch`.
-- Imports `RealESRGANer` from `realesrgan`.
-- Loads the model during FastAPI lifespan startup.
-- Uses `run_in_threadpool()` for CPU-heavy inference.
-- Supports only `MODEL_NAME = RealESRGAN_x4plus` in the current generated service.
+- 从 `basicsr.archs.rrdbnet_arch` 导入 `RRDBNet`。
+- 从 `realesrgan` 导入 `RealESRGANer`。
+- 在 FastAPI lifespan 启动阶段加载模型。
+- 使用 `run_in_threadpool()` 执行计算较重的推理。
+- 当前生成服务仅支持 `MODEL_NAME = RealESRGAN_x4plus`。
 
-Environment variables:
+环境变量：
 
 - `REALESRGAN_WEIGHT`, default `experiments/RealESRGAN_x4plus.pth`
 - `MODEL_PATH`, fallback alias for `REALESRGAN_WEIGHT`
@@ -201,33 +201,33 @@ Environment variables:
 - `TILE`, fallback alias for `REALESRGAN_TILE`
 - `MAX_INPUT_PIXELS`, default `4194304`
 
-Endpoints:
+端点：
 
-- `GET /`: returns service name and loaded state.
-- `GET /health`: returns health, model type `realesrgan`, task `image_super_resolution`, model name, and device.
-- `POST /predict/image`: accepts multipart image field `file`, optional `outscale`, and optional `tile`.
-- `POST /predict`: accepts JSON with base64 `image` and optional `parameters.outscale` / `parameters.tile`.
+- `GET /`: 返回服务名称和加载状态。
+- `GET /health`: 返回健康状态、模型类型 `realesrgan`、任务 `image_super_resolution`、模型名称和 device。
+- `POST /predict/image`: 接收 multipart 图片字段 `file`，可选 `outscale` 和 `tile`。
+- `POST /predict`: 接收 JSON，其中包含 base64 `image`，可选 `parameters.outscale` / `parameters.tile`。
 
-Output:
+输出：
 
-- PNG image encoded as base64 in `super_resolution_image`.
-- Same base64 output also appears as `processed_image` for frontend compatibility.
-- Includes original and output image dimensions, scale, and tile.
-- The per-request `tile` value is applied before inference, so callers can use larger tiles for speed or smaller tiles for lower memory usage.
+- `super_resolution_image` 中返回 base64 编码的 PNG 图片。
+- 为兼容前端，同一份 base64 输出也会出现在 `processed_image`。
+- 返回原始图片尺寸、输出图片尺寸、scale 和 tile。
+- 每次请求传入的 `tile` 会在推理前生效，调用方可用较大 tile 提升速度，或用较小 tile 降低显存/内存占用。
 
-### Generated Dockerfile
+### 生成的 Dockerfile
 
-The adapter writes a Dockerfile from `_generate_realesrgan_dockerfile()`.
+适配器通过 `_generate_realesrgan_dockerfile()` 生成 Dockerfile。
 
-Default base image:
+默认基础镜像：
 
 ```text
 pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
 ```
 
-The caller can override this by passing a non-default `base_image` or `config.realesrgan_base_image`.
+调用方可以通过非默认 `base_image` 或 `config.realesrgan_base_image` 覆盖基础镜像。
 
-Installed OS packages:
+安装的系统包：
 
 ```text
 gcc
@@ -241,7 +241,7 @@ libxrender1
 libgomp1
 ```
 
-Installed Python packages:
+安装的 Python 包：
 
 ```text
 fastapi==0.104.1
@@ -257,71 +257,71 @@ facexlib>=0.2.5
 gfpgan>=1.3.5
 ```
 
-The Dockerfile also:
+Dockerfile 还会：
 
-- Installs the uploaded Real-ESRGAN project in editable mode with `pip install --no-cache-dir --no-deps -e .`.
-- Creates `weights/` if missing.
-- Copies `experiments/RealESRGAN_x4plus.pth` to `weights/RealESRGAN_x4plus.pth` when needed.
-- Patches `basicsr/data/degradations.py` so `rgb_to_grayscale` is imported from `torchvision.transforms.functional`, which is compatible with newer torchvision versions.
+- 使用 `pip install --no-cache-dir --no-deps -e .` 以 editable 模式安装上传的 Real-ESRGAN 项目。
+- 如果缺少 `weights/`，则创建该目录。
+- 必要时将 `experiments/RealESRGAN_x4plus.pth` 复制到 `weights/RealESRGAN_x4plus.pth`。
+- 修补 `basicsr/data/degradations.py`，让 `rgb_to_grayscale` 从 `torchvision.transforms.functional` 导入，以兼容较新的 torchvision。
 
-For the sample archive under `2.超分模型/Real-ESRGAN.zip`, users should upload the zip directly from the frontend. They do not need to add `api.py`; the build adapter generates the platform-compatible FastAPI service during Docker image construction.
+对于示例压缩包 `2.超分模型/Real-ESRGAN.zip`，用户可以直接在前端上传 zip，不需要手动添加 `api.py`；构建适配器会在镜像构建阶段生成平台兼容的 FastAPI 服务。
 
-Runtime command:
+运行命令：
 
 ```text
 python -m uvicorn api:app --host 0.0.0.0 --port {port}
 ```
 
-Healthcheck:
+健康检查：
 
 ```text
 curl -f http://localhost:{port}/health || exit 1
 ```
 
-## User-Provided FastAPI Project Shortcut
+## 用户自带 FastAPI 项目
 
-If an uploaded project already includes both:
+如果上传项目已经同时包含：
 
 ```text
 api.py
 Dockerfile
 ```
 
-then the platform does not generate a wrapper. It copies that project as-is and uses the provided Dockerfile.
+平台不会生成包装服务，而是原样复制该项目并使用用户提供的 Dockerfile。
 
-Expected contract:
+期望契约：
 
-- FastAPI app object should be `app` in `api.py`.
-- The Dockerfile should expose the configured port.
-- The service should provide `GET /health`.
-- The service should provide either `POST /predict` or `POST /predict/image` for frontend and proxy compatibility.
+- `api.py` 中的 FastAPI 应用对象应为 `app`。
+- Dockerfile 应暴露配置的端口。
+- 服务应提供 `GET /health`。
+- 为兼容前端和后端代理，服务应提供 `POST /predict` 或 `POST /predict/image`。
 
-## Standard Service Contract
+## 标准服务契约
 
-Generated model services should expose:
+生成的模型服务应暴露：
 
 - `GET /health`
 - `POST /predict`
 - `POST /predict/image` when the model is image-based
 
-The platform and frontend expect:
+平台和前端期望：
 
-- JSON responses.
-- `success` boolean when possible.
-- `model_type` string.
-- For image-to-image tasks, base64 image output in `processed_image` and/or task-specific fields such as `super_resolution_image`.
+- 返回 JSON。
+- 尽可能包含 `success` 布尔值。
+- 包含 `model_type` 字符串。
+- 对图像到图像任务，在 `processed_image` 或任务特定字段中返回 base64 图片，例如 `super_resolution_image`。
 
-## Important Caveats
+## 注意事项
 
-- The current workspace has `data/models` empty, so no uploaded RCAN or Real-ESRGAN source project is available for direct inspection.
-- Existing registry images may not have matching source projects present under `data/models`.
-- Docker, Kubernetes, registry, and network availability should be checked before assuming a build or deployment can run.
-- Generated build contexts are removed after the Docker image build finishes, so inspect or preserve them during debugging if needed.
-- Large weights should be real binary files, not Git LFS pointer files.
+- 当前工作区的 `data/models` 为空，因此无法直接检查已上传的 RCAN 或 Real-ESRGAN 源项目。
+- Registry 中已有镜像不一定在 `data/models` 下保留对应源码。
+- 在判断构建或部署是否可运行前，应先检查 Docker、Kubernetes、Registry 和网络可用性。
+- 生成的构建上下文会在 Docker 镜像构建完成后删除；排查构建问题时如需查看，应提前保留或临时调整逻辑。
+- 大模型权重必须是真实二进制文件，不能是 Git LFS 指针文件。
 
-## Minimal Upload Layouts
+## 最小上传结构
 
-RCAN archive layout:
+RCAN 压缩包结构：
 
 ```text
 RCAN-project/
@@ -335,7 +335,7 @@ RCAN-project/
   requirements.txt
 ```
 
-Real-ESRGAN archive layout:
+Real-ESRGAN 压缩包结构：
 
 ```text
 Real-ESRGAN-project/
@@ -346,7 +346,7 @@ Real-ESRGAN-project/
     RealESRGAN_x4plus.pth
 ```
 
-Alternative Real-ESRGAN weight path:
+Real-ESRGAN 可选权重路径：
 
 ```text
 Real-ESRGAN-project/

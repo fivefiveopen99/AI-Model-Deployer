@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import io
+import json
 import zipfile
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
@@ -91,6 +92,44 @@ def _serialize_inference_result_payload(result_data: Optional[Dict[str, Any]]) -
         "result_digest": payload.get("result_digest") or ""
     }
     return payload
+
+
+def _serialize_readable_inference_result(result_data: Dict[str, Any], runtime: Dict[str, Any]) -> Dict[str, Any]:
+    active = bool(runtime.get("active"))
+    exit_code = result_data.get("exit_code")
+    if active:
+        status = "running"
+    elif result_data.get("finished_at"):
+        status = "succeeded" if exit_code == 0 else "failed"
+    else:
+        status = "idle"
+
+    logs = list(runtime.get("logs") or [])
+    stdout = result_data.get("stdout") or ""
+    stderr = result_data.get("stderr") or ""
+    files = list(result_data.get("files") or [])
+
+    return {
+        "status": status,
+        "active": active,
+        "task_id": runtime.get("task_id") or "",
+        "progress": int(runtime.get("progress") or 0),
+        "message": runtime.get("message") or "",
+        "started_at": result_data.get("started_at"),
+        "finished_at": result_data.get("finished_at"),
+        "exit_code": exit_code,
+        "stdout": stdout,
+        "stderr": stderr,
+        "logs": logs,
+        "files": files,
+        "summary": {
+            "file_count": len(files),
+            "image_count": len([item for item in files if item.get("kind") == "image"]),
+            "stdout_lines": len(stdout.splitlines()) if stdout else 0,
+            "stderr_lines": len(stderr.splitlines()) if stderr else 0,
+            "log_lines": len(logs)
+        }
+    }
 
 
 def serialize_deployment(deployment: Deployment) -> Dict[str, Any]:
@@ -676,7 +715,12 @@ async def run_inference_task(task_id: str, deployment_id: int, variables: Dict[s
 
 
 @router.get("/{deployment_id}/inference-result")
-async def get_inference_result(deployment_id: int, db: AsyncSession = Depends(get_db)):
+async def get_inference_result(
+    deployment_id: int,
+    view: Optional[str] = None,
+    pretty: bool = False,
+    db: AsyncSession = Depends(get_db)
+):
     result = await db.execute(select(Deployment).where(Deployment.id == deployment_id))
     deployment = result.scalar_one_or_none()
 
@@ -684,7 +728,23 @@ async def get_inference_result(deployment_id: int, db: AsyncSession = Depends(ge
         raise HTTPException(status_code=404, detail="Deployment not found")
 
     result_data = _serialize_inference_result_payload(deployment.last_inference_result)
-    result_data["runtime"] = _get_inference_runtime_status(deployment_id)
+    runtime = _get_inference_runtime_status(deployment_id)
+    result_data["runtime"] = runtime
+
+    if (view or "").strip().lower() == "readable":
+        return Response(
+            content=json.dumps(
+                _serialize_readable_inference_result(result_data, runtime),
+                ensure_ascii=False,
+                indent=2
+            ),
+            media_type="application/json"
+        )
+    if pretty:
+        return Response(
+            content=json.dumps(result_data, ensure_ascii=False, indent=2),
+            media_type="application/json"
+        )
     return result_data
 
 

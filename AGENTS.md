@@ -10,13 +10,13 @@ Core goals:
 
 - Register models from uploaded archives, GitHub repositories, direct URLs, or manually provided paths.
 - Auto-detect model project files and build a Docker image that exposes a FastAPI inference service.
-- Push built images to the bundled registry at `10.10.25.69:5000/ai-models`.
+- Push built images to the bundled registry at `${REGISTRY_HOST_IP}:5000/ai-models`.
 - Create Kubernetes Deployment and NodePort Service resources for model serving.
 - Provide a web UI for model management, deployment management, logs, scaling, and prediction testing.
 
 Important current design decision:
 
-- Image distribution is done through the bundled `registry:2` service. The backend tags `ai-model:{build_id}` as `10.10.25.69:5000/ai-models/ai-model:{build_id}` and pushes it.
+- Image distribution is done through the bundled `registry:2` service. The backend tags `ai-model:{build_id}` as `${REGISTRY_HOST_IP}:5000/ai-models/ai-model:{build_id}` and pushes it.
 - The model status value `pushing` is still used internally for registry push progress and backward compatibility.
 
 ## Repository Layout
@@ -135,7 +135,8 @@ Main config source:
 Key backend settings:
 
 - `DATABASE_URL`: default `sqlite+aiosqlite:///./data/models.db`
-- `DOCKER_REGISTRY_URL`: default `10.10.25.69:5000/ai-models`
+- `REGISTRY_HOST_IP`: deployment node IP reachable by Kubernetes nodes; set this per node before deployment.
+- `DOCKER_REGISTRY_URL`: default `${REGISTRY_HOST_IP}:5000/ai-models`
 - `DOCKER_REGISTRY_PUSH_URL`: default `localhost:5000/ai-models`
 - `DOCKER_REGISTRY_USERNAME`: default empty for bundled registry
 - `DOCKER_REGISTRY_PASSWORD`: default empty for bundled registry
@@ -244,7 +245,7 @@ Build steps:
 7. Run `docker build -t ai-model:{build_id} {build_context}`.
 8. Store Docker image metadata on the model row.
 9. Set status to `pushing` while publishing to the registry.
-10. Run `docker tag` and `docker push` to `localhost:5000/ai-models/ai-model:{build_id}`; store the deployable image as `10.10.25.69:5000/ai-models/ai-model:{build_id}`.
+10. Run `docker tag` and `docker push` to `localhost:5000/ai-models/ai-model:{build_id}`; store the deployable image as `${REGISTRY_HOST_IP}:5000/ai-models/ai-model:{build_id}`.
 11. Store registry image metadata on the model row.
 12. Mark model as `ready` after the registry push succeeds; mark it `failed` if the push fails.
 
@@ -255,8 +256,8 @@ Build context cleanup:
 Image naming:
 
 - Local built image tag format: `ai-model:{build_id}`.
-- Registry image tag format: `10.10.25.69:5000/ai-models/ai-model:{build_id}`.
-- `docker_image` becomes `10.10.25.69:5000/ai-models/ai-model`.
+- Registry image tag format: `${REGISTRY_HOST_IP}:5000/ai-models/ai-model:{build_id}`.
+- `docker_image` becomes `${REGISTRY_HOST_IP}:5000/ai-models/ai-model`.
 - `docker_image_tag` becomes `{build_id}`.
 
 Stored config values after build may include:
@@ -323,7 +324,7 @@ Deployment behavior:
   - Deployment: `model-{model_id}-{deployment_name}`
   - Service: `{deployment_name}-svc` as created from the deployment name in `_wait_for_deployment`; actual service name returned is `model-{model_id}-{deployment_name}-svc`.
 - Container name: `model`.
-- Container image: `10.10.25.69:5000/ai-models/ai-model:{build_id}` for new builds.
+- Container image: `${REGISTRY_HOST_IP}:5000/ai-models/ai-model:{build_id}` for new builds.
 - `image_pull_policy` is `Never` when image starts with `ai-model:`, otherwise `IfNotPresent`.
 - Pod specs include `imagePullSecrets` when `K8S_IMAGE_PULL_SECRET_NAME` is configured.
 - Probes use `GET /health`.
@@ -340,8 +341,8 @@ Prerequisites for deployment:
 - Backend container needs access to Docker socket and Docker CLI.
 - Backend container needs kube config or in-cluster config.
 - Backend host Docker daemon pushes through `localhost:5000`.
-- K8s worker nodes need network access to `10.10.25.69:5000`.
-- Because the bundled registry is HTTP, Kubernetes node Docker/containerd must allow `10.10.25.69:5000` as an insecure registry.
+- K8s worker nodes need network access to `${REGISTRY_HOST_IP}:5000`.
+- Because the bundled registry is HTTP, Kubernetes node Docker/containerd must allow `${REGISTRY_HOST_IP}:5000` as an insecure registry.
 
 ## Deployment Lifecycle
 

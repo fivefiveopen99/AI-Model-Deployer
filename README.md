@@ -33,6 +33,13 @@ ai-model-deployer/
 └── README.md
 ```
 
+## 用户文档
+
+- [用户文档目录](docs/README.md): 面向项目使用者、部署人员和维护人员。
+- [使用与运维说明](docs/usage-and-operations.md): 环境准备、启动配置、典型工作流、验证命令和常见排障。
+- [源代码说明](docs/source-code-guide.md): 源码目录、模块职责、常见改动入口和维护边界。
+- [模型项目 FastAPI/Docker 打包说明](docs/model-projects-fastapi-docker.md): 模型适配器、生成服务契约和最小上传结构，作为开发维护进阶参考。
+
 ## 快速开始
 
 ### 1. 环境要求
@@ -109,7 +116,8 @@ npm run dev
 
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
-| DOCKER_REGISTRY_URL | 内置 Docker Registry 仓库地址 | 10.10.25.69:5000/ai-models |
+| REGISTRY_HOST_IP | 部署节点对 Kubernetes 节点可访问的 IP，部署到不同节点时修改此值 | 127.0.0.1 |
+| DOCKER_REGISTRY_URL | 内置 Docker Registry 仓库地址 | ${REGISTRY_HOST_IP}:5000/ai-models |
 | DOCKER_REGISTRY_PUSH_URL | 后端 Docker daemon 推送地址 | localhost:5000/ai-models |
 | DOCKER_REGISTRY_USERNAME | Registry 推送账号，内置 registry 默认留空 | 空 |
 | DOCKER_REGISTRY_PASSWORD | Registry 推送密码，内置 registry 默认留空 | 空 |
@@ -117,7 +125,7 @@ npm run dev
 | K8S_NAMESPACE | 默认命名空间 | default |
 | K8S_IMAGE_PULL_SECRET_NAME | K8s 拉取私有镜像的 Secret 名称，内置 registry 默认留空 | 空 |
 
-Compose 会启动一个 `registry:2` 服务并通过宿主机 `5000` 端口暴露。后端 Docker daemon 通过 `localhost:5000/ai-models` 推送镜像，模型部署记录使用 `10.10.25.69:5000/ai-models/ai-model:<build_id>`。这是 HTTP registry，K8s 节点的容器运行时需要把 `10.10.25.69:5000` 配置为 insecure registry。
+Compose 会启动一个 `registry:2` 服务并通过宿主机 `5000` 端口暴露。部署前在 `.env` 中设置 `REGISTRY_HOST_IP` 为当前部署节点对 Kubernetes 节点可访问的 IP。后端 Docker daemon 通过 `localhost:5000/ai-models` 推送镜像，模型部署记录使用 `${REGISTRY_HOST_IP}:5000/ai-models/ai-model:<build_id>`。这是 HTTP registry，K8s 节点的容器运行时需要把 `${REGISTRY_HOST_IP}:5000` 配置为 insecure registry。
 
 ## 支持的模型类型
 

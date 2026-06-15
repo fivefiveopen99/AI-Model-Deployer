@@ -53,16 +53,6 @@ export const useModelsStore = defineStore('models', () => {
     }
   }
 
-  const createFinetuneModel = async (formData, onProgress) => {
-    try {
-      const response = await modelsApi.createFinetune(formData, onProgress)
-      return response.data
-    } catch (error) {
-      console.error('Failed to create finetune model:', error)
-      throw error
-    }
-  }
-
   const uploadModel = async (formData, onProgress) => {
     try {
       const response = await modelsApi.upload(formData, onProgress)
@@ -79,16 +69,6 @@ export const useModelsStore = defineStore('models', () => {
       return response.data
     } catch (error) {
       console.error('Failed to create model from URL:', error)
-      throw error
-    }
-  }
-
-  const updateModel = async (id, data) => {
-    try {
-      const response = await modelsApi.update(id, data)
-      return response.data
-    } catch (error) {
-      console.error('Failed to update model:', error)
       throw error
     }
   }
@@ -133,16 +113,6 @@ export const useModelsStore = defineStore('models', () => {
     }
   }
 
-  const getModelStatus = async (id) => {
-    try {
-      const response = await modelsApi.getStatus(id)
-      return response.data
-    } catch (error) {
-      console.error('Failed to get model status:', error)
-      throw error
-    }
-  }
-
   const fetchActiveBuildModels = async () => {
     const activeModels = []
     for (const status of ['building', 'pushing']) {
@@ -162,15 +132,12 @@ export const useModelsStore = defineStore('models', () => {
     fetchModels,
     fetchModelDetail,
     createModel,
-    createFinetuneModel,
     uploadModel,
     createModelFromUrl,
-    updateModel,
     deleteModel,
     buildModel,
     stopBuild,
     resetStatus,
-    getModelStatus,
     fetchActiveBuildModels
   }
 })

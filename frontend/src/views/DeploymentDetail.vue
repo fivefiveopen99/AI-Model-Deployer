@@ -144,6 +144,43 @@
             </div>
             <CodeBlock :content="logs || '暂无日志'" terminal />
           </PanelCard>
+
+          <PanelCard
+            v-if="inferenceEnabled"
+            eyebrow="API 调用"
+            title="命令工作台 API"
+            description="外部程序可以直接调用平台代理 API。"
+          >
+            <div class="api-endpoint-list">
+              <div v-for="item in apiEndpoints" :key="item.path" class="api-endpoint-item">
+                <div class="api-endpoint-main">
+                  <el-tag :type="item.method === 'POST' ? 'success' : 'info'" effect="plain">
+                    {{ item.method }}
+                  </el-tag>
+                  <code>{{ item.url }}</code>
+                </div>
+                <div class="api-endpoint-meta">
+                  <span>{{ item.description }}</span>
+                  <el-button size="small" @click="copyText(item.url)">
+                    <el-icon><CopyDocument /></el-icon>
+                  </el-button>
+                </div>
+              </div>
+            </div>
+
+            <div class="section-heading api-section-heading">curl 示例</div>
+            <el-tabs class="api-curl-tabs">
+              <el-tab-pane label="启动任务">
+                <CodeBlock :content="runInferenceCurl" terminal />
+              </el-tab-pane>
+              <el-tab-pane label="查询结果">
+                <CodeBlock :content="queryResultCurl" terminal />
+              </el-tab-pane>
+              <el-tab-pane label="下载全部">
+                <CodeBlock :content="downloadAllCurl" terminal />
+              </el-tab-pane>
+            </el-tabs>
+          </PanelCard>
         </div>
 
         <div class="content-stack">
@@ -238,20 +275,106 @@ const scaleReplicas = ref(1)
 const scaling = ref(false)
 
 const inferenceEnabled = computed(() => Boolean(deployment.value?.inference_config?.enabled))
+const inferenceVariableNames = computed(() => deployment.value?.inference_config?.variable_names || [])
+const appOrigin = computed(() => {
+  if (typeof window === 'undefined') return ''
+  return window.location.origin.replace(/\/$/, '')
+})
 const accessEntryUrl = computed(() => {
   if (!deployment.value?.access_path) return ''
-  const origin = window.location.origin.replace(/\/$/, '')
-  return `${origin}${deployment.value.access_path}`
+  return `${appOrigin.value}${deployment.value.access_path}`
 })
 const showDeployAction = computed(() => deployment.value?.status !== 'running' && deployment.value?.status !== 'deploying')
 const resourcesText = computed(() => JSON.stringify(deployment.value?.resources || {}, null, 2))
 const mountText = computed(() => JSON.stringify(deployment.value?.mount_config || {}, null, 2))
 const envText = computed(() => JSON.stringify(deployment.value?.env_vars || {}, null, 2))
+const deploymentApiBaseUrl = computed(() => {
+  if (!deployment.value?.id) return ''
+  return `${appOrigin.value}/api/v1/deployments/${deployment.value.id}`
+})
+const apiEndpoints = computed(() => {
+  if (!deploymentApiBaseUrl.value) return []
+  return [
+    {
+      method: 'POST',
+      path: '/run-inference',
+      url: `${deploymentApiBaseUrl.value}/run-inference`,
+      description: '启动一次命令工作台任务'
+    },
+    {
+      method: 'GET',
+      path: '/inference-result',
+      url: `${deploymentApiBaseUrl.value}/inference-result`,
+      description: '查询最近一次运行结果和运行中状态'
+    },
+    {
+      method: 'GET',
+      path: '/inference-previews',
+      url: `${deploymentApiBaseUrl.value}/inference-previews`,
+      description: '批量获取结果图片预览'
+    },
+    {
+      method: 'GET',
+      path: '/inference-files/{file_key}/preview',
+      url: `${deploymentApiBaseUrl.value}/inference-files/{file_key}/preview`,
+      description: '预览单个结果文件'
+    },
+    {
+      method: 'GET',
+      path: '/inference-files/{file_key}/download',
+      url: `${deploymentApiBaseUrl.value}/inference-files/{file_key}/download`,
+      description: '下载单个结果文件'
+    },
+    {
+      method: 'GET',
+      path: '/inference-files/download-all',
+      url: `${deploymentApiBaseUrl.value}/inference-files/download-all`,
+      description: '打包下载全部结果文件'
+    }
+  ]
+})
+const apiExampleVariables = computed(() => {
+  const names = inferenceVariableNames.value.length ? inferenceVariableNames.value : ['prompt']
+  return names.reduce((variables, name) => {
+    variables[name] = name === 'prompt' ? '你的输入内容' : `请填写 ${name}`
+    return variables
+  }, {})
+})
+const apiRequestExampleText = computed(() => JSON.stringify({
+  variables: apiExampleVariables.value
+}, null, 2))
+const runInferenceCurl = computed(() => ([
+  `curl -X POST '${deploymentApiBaseUrl.value}/run-inference' \\`,
+  `  -H 'Content-Type: application/json' \\`,
+  `  -d '${apiRequestExampleText.value}'`
+]).join('\n'))
+const queryResultCurl = computed(() => `curl '${deploymentApiBaseUrl.value}/inference-result?view=readable'`)
+const downloadAllCurl = computed(() => ([
+  `curl -L '${deploymentApiBaseUrl.value}/inference-files/download-all' \\`,
+  `  -o '${deployment.value?.name || 'deployment'}-results.zip'`
+]).join('\n'))
+
+const copyText = async (text) => {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制到剪贴板')
+  } catch {
+    const textarea = document.createElement('textarea')
+    textarea.value = text
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'fixed'
+    textarea.style.left = '-9999px'
+    document.body.appendChild(textarea)
+    textarea.select()
+    document.execCommand('copy')
+    document.body.removeChild(textarea)
+    ElMessage.success('已复制到剪贴板')
+  }
+}
 
 const copyEndpoint = () => {
-  if (!deployment.value?.endpoint) return
-  navigator.clipboard.writeText(deployment.value.endpoint)
-  ElMessage.success('已复制到剪贴板')
+  copyText(deployment.value?.endpoint)
 }
 
 const fetchLogs = async () => {
@@ -349,6 +472,48 @@ onMounted(async () => {
   font-family: var(--ui-font-mono);
   font-size: 13px;
   word-break: break-all;
+}
+
+.api-section-heading {
+  margin-top: 18px;
+}
+
+.api-endpoint-main code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: var(--ui-font-mono);
+}
+
+.api-endpoint-list {
+  display: grid;
+  gap: 10px;
+}
+
+.api-endpoint-item {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--ui-border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.api-endpoint-main,
+.api-endpoint-meta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.api-endpoint-meta {
+  grid-template-columns: minmax(0, 1fr) auto;
+  color: var(--ui-text-soft);
+  font-size: 13px;
+}
+
+.api-curl-tabs {
+  margin-top: 4px;
 }
 
 .scale-content {

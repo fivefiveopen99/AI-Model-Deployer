@@ -1174,9 +1174,13 @@ class DockerService:
             items = []
             for repository in sorted(repositories):
                 tags_response = await client.get(f"{api_base}/{repository}/tags/list")
+                if tags_response.status_code == 404:
+                    continue
                 tags_response.raise_for_status()
                 payload = tags_response.json()
                 tags = sorted(payload.get("tags") or [])
+                if not tags:
+                    continue
                 items.append({
                     "repository": repository,
                     "display_name": repository[len(namespace_prefix) + 1:] if namespace_prefix and repository.startswith(f"{namespace_prefix}/") else repository,
